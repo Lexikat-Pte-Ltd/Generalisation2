@@ -66,11 +66,11 @@ RUN --mount=type=cache,target=/root/.cache/pip,rw \
 
 COPY . /app/
 
-RUN mv /app/custom-models.conf /etc/supervisor/conf.d/
-RUN mv /app/supervisord.conf /etc/supervisor/
+COPY ./custom-models.conf /etc/supervisor/conf.d/
+COPY ./supervisord.conf /etc/supervisor/
 
 
-RUN cp /app/venv/lib/python3.10/site-packages/bitsandbytes/libbitsandbytes_cuda121.so /app/venv/lib/python3.10/site-packages/bitsandbytes/libbitsandbytes_cpu.so
+# RUN cp /app/venv/lib/python3.10/site-packages/bitsandbytes/libbitsandbytes_cuda121.so /app/venv/lib/python3.10/site-packages/bitsandbytes/libbitsandbytes_cpu.so
 
 # # Install extension requirements
 # RUN --mount=type=cache,target=/root/.cache/pip,rw \
