@@ -1,5 +1,7 @@
 psutil
 openai
 jsonlines
-openai
+openai==0.28.1
 langchain
+tiktoken
+fschat[model_worker,webui]

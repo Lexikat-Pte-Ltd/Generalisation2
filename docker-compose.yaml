@@ -4,5 +4,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    volumes:
+      - ./media/cc/2T/load_model:/models
     env_file:
       - .env
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
