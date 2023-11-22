@@ -81,7 +81,7 @@ ENV CLI_ARGS=""
 RUN apt update
 RUN apt-get install -y supervisor 
 COPY ./custom-models.conf /etc/supervisor/conf.d/
-COPY ./supervisord.conf /etc/supervisor/
+# COPY ./supervisord.conf /etc/supervisor/
 
 # EXPOSE ${CONTAINER_PORT:-7860} ${CONTAINER_API_PORT:-5000}
 CMD ["tail","-f"]
