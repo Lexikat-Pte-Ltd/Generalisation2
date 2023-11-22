@@ -9,6 +9,10 @@ RUN apt-get install -y supervisor
 
 WORKDIR /build
 
+ENV OPENAI_API_BASE=http://localhost:8000/v1
+ENV OPENAI_API_KEY=EMPTY
+
+
 RUN --mount=type=cache,target=/root/.cache/pip,rw \
     python3 -m venv /build/venv && \
     . /build/venv/bin/activate && \

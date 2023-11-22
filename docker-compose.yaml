@@ -3,11 +3,9 @@ services:
   generalisation-agent:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: TestDockerfile.dockerfile
     volumes:
       - ./media/cc/2T/load_model:/models
-    env_file:
-      - .env
     deploy:
       resources:
         reservations:
