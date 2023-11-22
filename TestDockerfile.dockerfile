@@ -1,10 +1,8 @@
 FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 as builder
-RUN apt update
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,rw apt-get update && \
     apt-get install --no-install-recommends -y git vim build-essential python3-dev python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
-RUN apt-get install -y supervisor 
 # RUN git clone --depth=1 https://github.com/oobabooga/GPTQ-for-LLaMa /build
 
 WORKDIR /build
@@ -81,6 +79,8 @@ COPY ./supervisord.conf /etc/supervisor/
 #     done
 
 ENV CLI_ARGS=""
+RUN apt update
+RUN apt-get install -y supervisor 
 
 # EXPOSE ${CONTAINER_PORT:-7860} ${CONTAINER_API_PORT:-5000}
 CMD ["tail","-f"]
