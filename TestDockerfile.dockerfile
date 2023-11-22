@@ -29,11 +29,11 @@ FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
 LABEL maintainer="Your Name <your.email@example.com>"
 LABEL description="Docker image for GPTQ-for-LLaMa and Text Generation WebUI"
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,rw apt-get update && \
+RUN apt-get update && \
     apt-get install --no-install-recommends -y python3-dev libportaudio2 libasound-dev git python3 python3-pip make g++ ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-RUN --mount=type=cache,target=/root/.cache/pip,rw pip3 install virtualenv
+# RUN --mount=type=cache,target=/root/.cache/pip,rw pip3 install virtualenv
 
 RUN mkdir /app
 
@@ -43,10 +43,8 @@ WORKDIR /app
 # RUN test -n "${WEBUI_VERSION}" && git reset --hard ${WEBUI_VERSION} || echo "Using provided webui source"
 
 # Create virtualenv
-RUN virtualenv /app/venv
-RUN --mount=type=cache,target=/root/.cache/pip,rw \
-    . /app/venv/bin/activate && \
-    pip3 install --upgrade pip setuptools wheel ninja && \
+# RUN virtualenv /app/venv
+RUN pip3 install --upgrade pip setuptools wheel ninja && \
     pip3 install torch xformers --index-url https://download.pytorch.org/whl/cu121 && \
     pip3 install torchvision torchaudio sentence_transformers
 
@@ -58,9 +56,9 @@ RUN --mount=type=cache,target=/root/.cache/pip,rw \
 
 # Install main requirements
 COPY requirements.txt /app/requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip,rw \
-    . /app/venv/bin/activate && \
-    pip3 install -r requirements.txt
+# RUN --mount=type=cache,target=/root/.cache/pip,rw \
+#     . /app/venv/bin/activate && \
+#     pip3 install -r requirements.txt
 
 COPY . /app/
 
