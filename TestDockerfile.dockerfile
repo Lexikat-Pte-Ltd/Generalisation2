@@ -83,4 +83,4 @@ COPY ./supervisord.conf /etc/supervisor/
 ENV CLI_ARGS=""
 
 # EXPOSE ${CONTAINER_PORT:-7860} ${CONTAINER_API_PORT:-5000}
-CMD ['cat']
+CMD ["tail","-f"]
