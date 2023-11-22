@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: TestDockerfile.dockerfile
     volumes:
-      - ./media/cc/2T/load_model:/models
+      - /media/cc/2T/load_model:/models
     deploy:
       resources:
         reservations:
