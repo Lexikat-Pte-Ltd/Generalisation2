@@ -64,8 +64,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,rw \
 
 COPY . /app/
 
-COPY ./custom-models.conf /etc/supervisor/conf.d/
-COPY ./supervisord.conf /etc/supervisor/
+
 
 
 # RUN cp /app/venv/lib/python3.10/site-packages/bitsandbytes/libbitsandbytes_cuda121.so /app/venv/lib/python3.10/site-packages/bitsandbytes/libbitsandbytes_cpu.so
@@ -81,6 +80,8 @@ COPY ./supervisord.conf /etc/supervisor/
 ENV CLI_ARGS=""
 RUN apt update
 RUN apt-get install -y supervisor 
+COPY ./custom-models.conf /etc/supervisor/conf.d/
+COPY ./supervisord.conf /etc/supervisor/
 
 # EXPOSE ${CONTAINER_PORT:-7860} ${CONTAINER_API_PORT:-5000}
 CMD ["tail","-f"]
