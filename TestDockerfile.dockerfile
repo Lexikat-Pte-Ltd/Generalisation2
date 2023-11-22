@@ -1,5 +1,5 @@
 FROM nvidia/cuda:12.1.0-devel-ubuntu22.04 as builder
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,rw apt-get update && \
+RUN apt-get update && \
     apt-get install --no-install-recommends -y git vim build-essential python3-dev python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
@@ -11,18 +11,14 @@ ENV OPENAI_API_BASE=http://localhost:8000/v1
 ENV OPENAI_API_KEY=EMPTY
 
 
-RUN --mount=type=cache,target=/root/.cache/pip,rw \
-    python3 -m venv /build/venv && \
-    . /build/venv/bin/activate && \
-    pip3 install --upgrade pip setuptools wheel ninja && \
+RUN pip3 install --upgrade pip setuptools wheel ninja && \
     pip3 install torch torchvision torchaudio xformers --index-url https://download.pytorch.org/whl/cu121 && \
     pip3 install -r requirements.txt
 
 # https://developer.nvidia.com/cuda-gpus
 # for a rtx 2060: ARG TORCH_CUDA_ARCH_LIST="7.5"
 ARG TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-3.5;5.0;6.0;6.1;7.0;7.5;8.0;8.6+PTX}"
-RUN . /build/venv/bin/activate && \
-    python3 setup_cuda.py bdist_wheel -d .
+RUN python3 setup_cuda.py bdist_wheel -d .
 
 FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
 
