@@ -152,6 +152,7 @@ class Gen_Agent:
             max_tokens=500,
             temperature=0.5
             )
+        logging.info(f"[PROMPT] generate_task_list {input}")
         
         new_skill_sets = response['choices'][0]['text'].replace("\n","")
         new_skill_sets = re.split(r'(?!^)(?=(?<!\d)\d+.)', new_skill_sets)
@@ -172,6 +173,7 @@ class Gen_Agent:
             max_tokens=500,
             temperature=0.5
             )
+        logging.info(f"[PROMPT] code {input}")
         code = response['choices'][0]['text']
         logging.info(f"code {code}")
         return code
@@ -297,12 +299,14 @@ class Gen_Agent:
             self.detect_env()
             prompt = f"correct python script in string format: {script}, the error for the script is {err} on line {script_per_line[err_line-1]} and output is {out}. Print out code only\n"
             input = self.env_prompt + prompt 
+            
             response = openai.Completion.create(
                 model=self.model,
                 prompt = input,
                 max_tokens=500,
                 temperature=0
                 )
+            logging.info(f"[PROMPT] correct_err {input}")
             script = response['choices'][0]['text']
             if script == old_script:
                 return 0,  False
@@ -321,6 +325,7 @@ class Gen_Agent:
             max_tokens=500,
             temperature=0.5
             )
+        logging.info(f"[PROMPT] do better {input}")
         code = response['choices'][0]['text']
         logging.info(f"do better {code}")
         return code
