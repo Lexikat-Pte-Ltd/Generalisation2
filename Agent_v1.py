@@ -14,6 +14,8 @@ import logging
 import json
 from subprocess import TimeoutExpired
 from env_prompt import ENV_PROMPT_TEMPLATE
+from langchain.llms import OpenAI
+from langchain.chains import LLMChain
 
 logging.basicConfig(level=logging.INFO,
                     filename="/logs/app.log",
@@ -144,29 +146,39 @@ class Gen_Agent:
         env_prompt = f"current directory is {self.train_space} and available memory of current directory: {self.environment_info['explore_space']} MB."\
             f"storage for code is {self.environment_info['available_memory']} MB, the task code size shall not exceed storage limit "
         
-        prompt = "generate a few speific potential tasks description an AI program can achieve to free up some space based on below limits:"
-        input = prompt + env_prompt
-        response = openai.Completion.create(
-            model=self.model,
-            prompt = input,
-            max_tokens=500,
-            temperature=0.5
-            )
+        prompt = "generate a few speific potential tasks description an AI program can achieve to free up some space based on below limits. Only generate the task:\n"
+        input = prompt + env_prompt + "\nTask:"
+
+        from langchain import  PromptTemplate
+        template = "{question}"
+        prompt = PromptTemplate(template=template, input_variables=['question'])
+
+        llm = OpenAI(openai_api_base="https://api.openai.com/v1",
+             openai_api_key='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')
+        
+        llm_chain = LLMChain(prompt=prompt, llm=llm)
+        response = llm_chain.invoke({"question":input})['text']
+
+        # response = openai.Completion.create(
+        #     model=self.model,
+        #     prompt = input,
+        #     max_tokens=500,
+        #     temperature=0.5
+        #     )
         logging.info(f"[PROMPT] generate_task_list {input}")
         
-        new_skill_sets = response['choices'][0]['text'].replace("\n","")
-        new_skill_sets = re.split(r'(?!^)(?=(?<!\d)\d+.)', new_skill_sets)
+        new_skill_sets = response.split("\n")
         new_skill_sets = [re.sub(r'\d+\.', '', string) for string in new_skill_sets]
-        new_skill_sets
+
         logging.info(f"generate_task_list {new_skill_sets}")
         return new_skill_sets
 
     # This function is to interact with API to get code to implement tasks
     def generate_task_code(self,new_skill):
         self.detect_env()
-        prompt = "Generate python code for the task (print out code only). Do not generate any comments :\n"
+        prompt = f"Generate python code for the task: {new_skill}\n Print out code only. Do not generate any comments :\nCode:"
         task_prompt = self.env_prompt + new_skill
-        input = prompt + task_prompt
+        input = self.env_prompt + prompt + task_prompt
         response = openai.Completion.create(
             model=self.model,
             prompt = input,
