@@ -350,6 +350,8 @@ class Gen_Agent:
         if not self.skills_to_learn:
             raise Exception('There is no new skill to learn!')
         for new_task in self.skills_to_learn:
+            if len(new_task.strip()) == 0:
+                continue
             self.backup()
             script = self.generate_task_code(new_task)
             # AI writes script and tests it.
