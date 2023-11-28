@@ -42,6 +42,22 @@ class Gen_Agent:
         # environment information
         self.environment_info = {}
         self.detect_env()
+
+    def preprocess_code(code):
+        """sometimes wizardcoder generate code with monospace thingy and explanation, so we need to delete it"""
+        """ Example: ```python
+            print("Hello world")
+            ```
+
+            Explanation:
+
+            1. The script says hello!"""
+        """Expected Result: print("Hello world")"""
+        cleaned_code = code[code.find('```python')+9:code.rfind('```')]
+        if len(cleaned_code) == 0:
+            return code
+        else:
+            return cleaned_code
         
     #@staticmethod   
     def detect_env(self):
@@ -187,6 +203,7 @@ class Gen_Agent:
             )
         logging.info(f"[PROMPT] code {input}")
         code = response['choices'][0]['text']
+        code = self.preprocess_code(code)
         logging.info(f"code {code}")
         return code
 
@@ -323,6 +340,7 @@ class Gen_Agent:
             if script == old_script:
                 return 0,  False
             old_script = script
+            script = self.preprocess_code(script)
             logging.info(f"correct_err {script}")
             count  +=1
     
@@ -339,6 +357,7 @@ class Gen_Agent:
             )
         logging.info(f"[PROMPT] do better {task_prompt}")
         code = response['choices'][0]['text']
+        code = self.preprocess_code(code)
         logging.info(f"do better {code}")
         return code
 
