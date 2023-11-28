@@ -178,7 +178,7 @@ class Gen_Agent:
         self.detect_env()
         prompt = f"Generate python code for the task: {new_skill}\n Print out code only. Do not generate any comments :\nCode:"
         task_prompt = self.env_prompt + new_skill
-        input = self.env_prompt + prompt + task_prompt
+        input = self.env_prompt + prompt
         response = openai.Completion.create(
             model=self.model,
             prompt = input,
