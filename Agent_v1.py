@@ -156,49 +156,11 @@ class Gen_Agent:
                 return {}
         else:
             return self.skills_recorder
-
-    #Function to get most recent info about the environment
-    def get_last_3000_characters(file_path='environment.txt'):
-      try:
-        with open(file_path, 'rb') as file:
-            last_3000_characters = file.read().decode('utf-8')
-        return last_3000_characters
-      except FileNotFoundError as e:
-        print(f"File not found: {e.filename}")
-        return None
-      except Exception as e:
-        print(f"An error occurred: {e}")
-        return None
-
-    #Function to learn more about the environment
-    def get_information_from_gpt():
-      try:
-        openai.api_key = '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'
-        envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {get_last_3000_characters()}\n Code:"
-        
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt=envprompt,
-            max_tokens=500,
-            temperature=0.5
-        )
-        
-        return str(response.choices[0].text)
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return None
-
-    #Function to add the new info about the environment to the environment file
-    def append_to_file(variable_content, file_path='environment.txt'):
-      try:
-        with open(file_path, "a") as file:
-            file.write("\n" + variable_content + "\n")
-      except Exception as e:
-        print(f"An error occurred: {e}")
-  
+    
     # This function is to interact with API to get available actions set
     def generate_task_list(self):
-        env_prompt = f"The working environment is as follows: {get_last_3000_characters()} \n The task code size shall not exceed storage limit "
+        env_prompt = f"current directory is {self.train_space} and available memory of current directory: {self.environment_info['explore_space']} MB."\
+            f"storage for code is {self.environment_info['available_memory']} MB, the task code size shall not exceed storage limit "
         
         prompt = "generate a few speific potential tasks description an AI program can achieve to free up some space based on below limits. Only generate the task:\n"
         input = prompt + env_prompt + "\nTask:"
@@ -208,7 +170,7 @@ class Gen_Agent:
         prompt = PromptTemplate(template=template, input_variables=['question'])
 
         llm = OpenAI(openai_api_base="https://api.openai.com/v1",
-             openai_api_key='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')
+             openai_api_key='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')
         
         llm_chain = LLMChain(prompt=prompt, llm=llm)
         response = llm_chain.invoke({"question":input})['text']
