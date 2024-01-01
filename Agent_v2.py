@@ -170,23 +170,24 @@ class Gen_Agent:
         print(f"An error occurred: {e}")
         return None
 
-    #Function to learn more about the environment
+    # Function to learn more about the environment
     def get_information_from_gpt():
-      try:
-        openai.api_key = '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'
-        envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {get_last_3000_characters()}\n Code:"
+        try:
+            openai.api_key = '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'
+            envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {get_last_3000_characters()}\n Code:"
         
-        response = openai.Completion.create(
-            model="text-davinci-003",
-            prompt=envprompt,
-            max_tokens=500,
-            temperature=0.5
-        )
+            response = openai.Completion.create(
+                model="text-davinci-003",
+                prompt=envprompt,
+                max_tokens=500,
+                temperature=0.5
+            )
         
-        return str(response.choices[0].text)
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return None
+            return str(response.choices[0].text)
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            return None
+
 
     #Function to add the new info about the environment to the environment file
     def append_to_file(variable_content, file_path='environment.txt'):
@@ -198,7 +199,7 @@ class Gen_Agent:
   
     # This function is to interact with API to get available actions set
     def generate_task_list(self):
-        env_prompt = f"The working environment is as follows: {get_last_3000_characters()} \n The task code size shall not exceed storage limit "
+        env_prompt = f"The working environment is as follows: {get_last_3000_characters()} \n "
         
         prompt = "generate a few speific potential tasks description an AI program can achieve to free up some space based on below limits. Only generate the task:\n"
         input = prompt + env_prompt + "\nTask:"
