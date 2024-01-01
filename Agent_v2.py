@@ -174,7 +174,7 @@ class Gen_Agent:
     def get_information_from_gpt():
         try:
             openai.api_key = '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'
-            envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {get_last_3000_characters()}\n Code:"
+            envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {self.get_last_3000_characters()}\n Code:"
         
             response = openai.Completion.create(
                 model="text-davinci-003",
@@ -199,7 +199,7 @@ class Gen_Agent:
   
     # This function is to interact with API to get available actions set
     def generate_task_list(self):
-        env_prompt = f"The working environment is as follows: {get_last_3000_characters()} \n "
+        env_prompt = f"The working environment is as follows: {self.get_last_3000_characters()} \n "
         
         prompt = "generate a few speific potential tasks description an AI program can achieve to free up some space based on below limits. Only generate the task:\n"
         input = prompt + env_prompt + "\nTask:"
