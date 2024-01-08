@@ -37,7 +37,7 @@ class Gen_Agent:
         self.train_space = self.epoch_space
         self.skill_space = skill_storage_pth
         self.skills_to_learn = None      
-        self.model = 'text-davinci-003'
+        self.model = 'gpt-3.5-turbo-instruct'
         self.env_prompt = ""
         # environment information
         self.environment_info = {}

@@ -37,7 +37,7 @@ class Gen_Agent:
         self.train_space = self.epoch_space
         self.skill_space = skill_storage_pth
         self.skills_to_learn = None      
-        self.model = 'text-davinci-003'
+        self.model = 'gpt-3.5-turbo-instruct'
         self.env_prompt = ""
         # environment information
         self.environment_info = {}
@@ -177,7 +177,7 @@ class Gen_Agent:
             envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {self.get_last_3000_characters()}\n Code:"
         
             response = openai.Completion.create(
-                model="text-davinci-003",
+                model="gpt-3.5-turbo-instruct",
                 prompt=envprompt,
                 max_tokens=500,
                 temperature=0.5
