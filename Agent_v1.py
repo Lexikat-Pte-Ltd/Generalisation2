@@ -375,6 +375,7 @@ class Gen_Agent:
             script = self.generate_task_code(new_task)
             # AI writes script and tests it.
             freed_space, test_result_success  = self.test(script,new_task)
+            logging.info(f'task {new_task} status: {test_result_success}\nfreed Space: {freed_space}')
             # logging.info(f"reward {self.rewards}")
             # count=0
             # try 10 times before giving up

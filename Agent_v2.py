@@ -28,7 +28,7 @@ class Gen_Agent:
         # record all learned skills, {key:task, value:code}
         self.skills_recorder = {}
         # record of the reward for each skill {key:task, value:reward}
-        self.rewards = {}
+        self.rewards = []
         # flag is True when there is enough memory; False when there is less than 0.5 MB total memory
         self.mem_flag = True
         self.ori_train_space =  train_space or os.getcwd()
@@ -345,6 +345,14 @@ class Gen_Agent:
 
                 # calculate the amount of space freed up by the script
                 space_freed_up = free_space_after - free_space_before
+                task = {}
+                task['task'] = new_task
+                task['result'] = {
+                    'code':script,
+                    'reward':space_freed_up,
+                    'error':err
+                }
+                self.rewards.append(task)
                 out = out.decode('utf-8')
             
                 if err:
@@ -416,6 +424,7 @@ class Gen_Agent:
             script = self.generate_task_code(new_task)
             # AI writes script and tests it.
             freed_space, test_result_success  = self.test(script,new_task)
+            logging.info(f'task {new_task} status: {test_result_success}\nfreed Space: {freed_space}')
             # logging.info(f"reward {self.rewards}")
             # count=0
             # try 10 times before giving up
@@ -435,12 +444,20 @@ class Gen_Agent:
 
                     if test_result_success == True:
                         if better_freed_space > 0:
-                            self.skills_recorder[new_task] = script
-                            self.rewards[new_task] = (script,freed_space)
+                            # self.skills_recorder[new_task] = script
+                            pass
+                            # task = {}
+                            # task['task'] = new_task
+                            # task['result'] = (script,freed_space)
+                            # self.rewards.append(task)
                 else:
                     # self.apply(new_task)
-                    self.skills_recorder[new_task] = script
-                    self.rewards[new_task] = (script,freed_space)
+                    # self.skills_recorder[new_task] = script
+                    pass
+                    # task = {}
+                    # task['task'] = new_task
+                    # task['result'] = (script,freed_space)
+                    # self.rewards.append(task)
 
                     # break              
             shutil.rmtree(self.train_space,ignore_errors=True)
