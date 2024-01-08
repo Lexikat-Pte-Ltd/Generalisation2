@@ -158,7 +158,7 @@ class Gen_Agent:
             return self.skills_recorder
 
     #Function to get most recent info about the environment
-    def get_last_3000_characters(file_path='environment.txt'):
+    def get_last_3000_characters(self,file_path='environment.txt'):
       try:
         with open(file_path, 'rb') as file:
             last_3000_characters = file.read().decode('utf-8')
@@ -210,6 +210,7 @@ class Gen_Agent:
 
         llm = OpenAI(openai_api_base="https://api.openai.com/v1",
              openai_api_key='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')
+        print(prompt.format(question=input))
         
         llm_chain = LLMChain(prompt=prompt, llm=llm)
         response = llm_chain.invoke({"question":input})['text']
