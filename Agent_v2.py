@@ -43,7 +43,7 @@ class Gen_Agent:
         self.environment_info = {}
         self.detect_env()
 
-    def preprocess_code(code):
+    def preprocess_code(self,code):
         """sometimes wizardcoder generate code with monospace thingy and explanation, so we need to delete it"""
         """ Example: ```python
             print("Hello world")
@@ -242,6 +242,7 @@ class Gen_Agent:
             )
         logging.info(f"[PROMPT] code {input}")
         code = response['choices'][0]['text']
+        
         code = self.preprocess_code(code)
         logging.info(f"code {code}")
         return code
