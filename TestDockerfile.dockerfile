@@ -77,6 +77,7 @@ RUN apt-get install -y supervisor
 RUN apt install git -y
 
 RUN git clone https://github.com/Lexikat-Pte-Ltd/Lexikat-FastChat.git
+RUN pip install -r requirements.txt
 RUN cp -R Lexikat-FastChat/fastchat /usr/local/lib/python3.10/dist-packages/
 COPY ./custom-models.conf /etc/supervisor/conf.d/
 # COPY ./supervisord.conf /etc/supervisor/
