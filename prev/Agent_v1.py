@@ -13,7 +13,7 @@ import time
 import logging
 import json
 from subprocess import TimeoutExpired
-from env_prompt import ENV_PROMPT_TEMPLATE
+from prev.env_prompt import ENV_PROMPT_TEMPLATE
 from langchain.llms import OpenAI
 from langchain.chains import LLMChain
 
@@ -28,7 +28,7 @@ class Gen_Agent:
         # record all learned skills, {key:task, value:code}
         self.skills_recorder = {}
         # record of the reward for each skill {key:task, value:reward}
-        self.rewards = []
+        self.rewards = {}
         # flag is True when there is enough memory; False when there is less than 0.5 MB total memory
         self.mem_flag = True
         self.ori_train_space =  train_space or os.getcwd()
@@ -43,7 +43,7 @@ class Gen_Agent:
         self.environment_info = {}
         self.detect_env()
 
-    def preprocess_code(self,code):
+    def preprocess_code(code):
         """sometimes wizardcoder generate code with monospace thingy and explanation, so we need to delete it"""
         """ Example: ```python
             print("Hello world")
@@ -156,50 +156,11 @@ class Gen_Agent:
                 return {}
         else:
             return self.skills_recorder
-
-    #Function to get most recent info about the environment
-    def get_last_3000_characters(self,file_path='environment.txt'):
-      try:
-        with open(file_path, 'rb') as file:
-            last_3000_characters = file.read().decode('utf-8')
-        return last_3000_characters
-      except FileNotFoundError as e:
-        print(f"File not found: {e.filename}")
-        return None
-      except Exception as e:
-        print(f"An error occurred: {e}")
-        return None
-
-    # Function to learn more about the environment
-    def get_information_from_gpt():
-        try:
-            openai.api_key = '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'
-            envprompt = f"You are a cyber security program installed on a device described below, which is connected to other devices. Please write a script to learn one new thing about the operating environment. Write only code. \n Environment info: {self.get_last_3000_characters()}\n Code:"
-        
-            response = openai.Completion.create(
-                model="gpt-3.5-turbo-instruct",
-                prompt=envprompt,
-                max_tokens=500,
-                temperature=0.5
-            )
-        
-            return str(response.choices[0].text)
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            return None
-
-
-    #Function to add the new info about the environment to the environment file
-    def append_to_file(variable_content, file_path='environment.txt'):
-      try:
-        with open(file_path, "a") as file:
-            file.write("\n" + variable_content + "\n")
-      except Exception as e:
-        print(f"An error occurred: {e}")
-  
+    
     # This function is to interact with API to get available actions set
     def generate_task_list(self):
-        env_prompt = f"The working environment is as follows: {self.get_last_3000_characters()} \n "
+        env_prompt = f"current directory is {self.train_space} and available memory of current directory: {self.environment_info['explore_space']} MB."\
+            f"storage for code is {self.environment_info['available_memory']} MB, the task code size shall not exceed storage limit "
         
         prompt = "generate a few speific potential tasks description an AI program can achieve to free up some space based on below limits. Only generate the task:\n"
         input = prompt + env_prompt + "\nTask:"
@@ -209,8 +170,7 @@ class Gen_Agent:
         prompt = PromptTemplate(template=template, input_variables=['question'])
 
         llm = OpenAI(openai_api_base="https://api.openai.com/v1",
-             openai_api_key='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')
-        print(prompt.format(question=input))
+             openai_api_key='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')
         
         llm_chain = LLMChain(prompt=prompt, llm=llm)
         response = llm_chain.invoke({"question":input})['text']
@@ -243,7 +203,6 @@ class Gen_Agent:
             )
         logging.info(f"[PROMPT] code {input}")
         code = response['choices'][0]['text']
-        
         code = self.preprocess_code(code)
         logging.info(f"code {code}")
         return code
@@ -345,14 +304,6 @@ class Gen_Agent:
 
                 # calculate the amount of space freed up by the script
                 space_freed_up = free_space_after - free_space_before
-                task = {}
-                task['task'] = new_task
-                task['result'] = {
-                    'code':script,
-                    'reward':space_freed_up,
-                    'error':err
-                }
-                self.rewards.append(task)
                 out = out.decode('utf-8')
             
                 if err:
@@ -444,20 +395,12 @@ class Gen_Agent:
 
                     if test_result_success == True:
                         if better_freed_space > 0:
-                            # self.skills_recorder[new_task] = script
-                            pass
-                            # task = {}
-                            # task['task'] = new_task
-                            # task['result'] = (script,freed_space)
-                            # self.rewards.append(task)
+                            self.skills_recorder[new_task] = script
+                            self.rewards[new_task] = (script,freed_space)
                 else:
                     # self.apply(new_task)
-                    # self.skills_recorder[new_task] = script
-                    pass
-                    # task = {}
-                    # task['task'] = new_task
-                    # task['result'] = (script,freed_space)
-                    # self.rewards.append(task)
+                    self.skills_recorder[new_task] = script
+                    self.rewards[new_task] = (script,freed_space)
 
                     # break              
             shutil.rmtree(self.train_space,ignore_errors=True)

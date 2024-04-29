@@ -11,7 +11,7 @@ from langchain.chains import LLMChain
 
 import re
 
-from env_prompt import ENV_PROMPT_TEMPLATE
+from prev.env_prompt import ENV_PROMPT_TEMPLATE
 
 tool_kit = {"google_cloud":{"api_key":""}} # there are also other tools we can use to store the files
 
