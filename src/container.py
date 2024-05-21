@@ -1,17 +1,46 @@
-from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Tuple, cast
 
-import docker
 from docker import DockerClient
-from pydantic import BaseModel
+from docker.models.containers import Container
 from loguru import logger
 
-from src.container import safe_container_get
 from src.data import EnvironmentInfo
 
-logger.add("logs/controller.log")
 
+def safe_container_get(client: DockerClient, container_id: str) -> Container:
+    container = client.containers.get(container_id)
+
+    if not isinstance(container, Container):
+        logger.error(
+            f"safe_container_get {client.api.base_url} {container_id[:10]} - Container not found"
+        )
+        raise ValueError("Container not found")
+
+    return container
+
+
+def safe_folderlist_bfs(
+    client: DockerClient, container_id: str, path: str | Path, max_depth=3
+) -> List[str]:
+    container = safe_container_get(client, container_id)
+    folders: List[str] = []
+
+    for i in range(1, max_depth + 1):
+        bash_command = f"find -mindepth {i} -maxdepth {i} -type d"
+        exit_code, output = container.exec_run(cmd=bash_command)
+
+        if exit_code != 0 or not isinstance(output, bytes):
+            logger.error(
+                f"safe_get_filelist {client.api.base_url} {container_id[:10]} - `{bash_command}` failed"
+            )
+            raise ValueError(f"`{bash_command}` failed")
+
+        lines = output.decode().splitlines()
+
+        folders = folders + lines
+
+    return folders
 
 
 def safe_filelist(
@@ -52,8 +81,7 @@ def safe_detect_env(client: DockerClient, container_id: str) -> EnvironmentInfo:
 
     total_system_memory = int(mem_info[1])
     available_system_memory = int(mem_info[6])
-    running_memory = available_system_memory // 2
-    storage_space = available_system_memory - running_memory
+    running_memory = total_system_memory - available_system_memory
 
     # Get storage (disk space) information
     exit_code, output = container.exec_run(cmd="df -m /")
@@ -87,56 +115,16 @@ def safe_detect_env(client: DockerClient, container_id: str) -> EnvironmentInfo:
     return env_info
 
 
-def generate_task_list(
-    client: DockerClient,
-    container_id: str,
-    in_con_path: str | Path,
-    env_info: EnvironmentInfo,
-    prompt_template: str,
-    env_prompt_template: str,
-):
-    in_con_files = safe_filelist(client, container_id, in_con_path)
-    env_prompt = env_prompt_template.format(
-        env_info=env_info,
-        in_con_files=in_con_files,
-    )
-    prompt = prompt_template.format(in_con_path=in_con_path)
-    final_prompt = env_prompt + prompt
-    
+def run_code_in_con(
+    client: DockerClient, container_id: str, escaped_code: str
+) -> Tuple[int, str]:
+    container = safe_container_get(client, container_id)
 
+    command = f"python -c \"{escaped_code}\""
 
-class AgentController:
-    def __init__(
-        self,
-        client: DockerClient,
-        container_id: str,
-        in_con_path="/",
-        out_con_path="./data/controller/",
-    ):
-        self.client = client
-        self.container_id = container_id
-        self.in_con_path = Path(in_con_path)  # For in container working path
-        self.out_con_path = Path(out_con_path)  # For out container (host) working path
+    # Calculate running and storage space based on available memory
+    result = cast(Tuple[int, bytes], container.exec_run(cmd=command))
+    exit_code, output = result
 
-        self.logs_path = self.out_con_path / "logs"
-        self.logs_path.mkdir(parents=True, exist_ok=True)
-        self.learned_skills_path = self.out_con_path / "learned_skils"
-        self.learned_skills_path.mkdir(parents=True, exist_ok=True)
-        self.train_backup_path = self.out_con_path / "learned_backup_path"
-        self.train_backup_path.mkdir(parents=True, exist_ok=True)
+    return exit_code, output.decode()
 
-        self.env_prompt = ""
-        self.env_info = safe_detect_env(self.client, self.container_id)
-
-
-if __name__ == "__main__":
-    container_id = "befd8371212dc53f9d2e944b64dc6009bcb48658ca29418281b071514b4db964"
-
-    client = docker.from_env()
-    controller = AgentController(
-        client=client,
-        container_id=container_id,
-    )
-    print(controller.env_info)
-
-    # safe_filelist(client, container_id, "/")

@@ -9,7 +9,7 @@ from docker import DockerClient
 from docker.models.containers import Container
 from loguru import logger
 
-from lib.container import safe_container_get
+from src.container import safe_container_get
 
 logger.add("logs/refresher.log")
 

@@ -1,0 +1,9 @@
+version: '3.8'  # Use a suitable version for your needs
+
+services:
+  space-warmer:
+    build:
+      context: .  # Directory containing the Dockerfile
+      dockerfile: Dockerfile.space_warmer  # Specifies the Dockerfile name
+    container_name: space-warmer-container  # Optional: Name the container
+    restart: unless-stopped  # Optional: Policy for restarting the container

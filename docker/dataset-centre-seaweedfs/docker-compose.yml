@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  seaweedfs:
+    image: chrislusf/seaweedfs
+    command: server -s3
+    ports:
+      - "8333:8333"
+    container_name: gen2-seaweedfs

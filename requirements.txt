@@ -1,7 +1,8 @@
 psutil
 openai
 jsonlines
-openai==0.28.1
 langchain
 tiktoken
-fschat[model_worker,webui]
+python-dotenv
+pydantic
+loguru

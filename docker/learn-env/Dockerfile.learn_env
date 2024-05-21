@@ -4,5 +4,4 @@ FROM alpine:latest
 # Install Python
 RUN apk add --no-cache python3 py3-pip
 
-# Set the default command to run when starting the container
-CMD ["sh"]
+CMD ["tail", "-f", "/dev/null"]
