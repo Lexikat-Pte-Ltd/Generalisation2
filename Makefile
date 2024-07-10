@@ -1,31 +1,23 @@
-# Makefile
-
+.ONESHELL: 
 .PHONY: seaweed seaweed-up seaweed-down seaweed-restart seaweed-attach
 
-seaweed:
-	@echo "Starting SeaweedFS..."
-	docker-compose -f docker/dataset-centre-seaweedfs/docker-compose.yml up -d
+run-main: up-test-container
+	python scripts/main.py
 
-seaweed-down:
-	@echo "Stopping SeaweedFS..."
-	docker-compose -f docker/dataset-centre-seaweedfs/docker-compose.yml down
+up-test-container:
+	cd docker/learn-compose/
+	docker compose up -d
 
-seaweed-restart: 
-	seaweed-down seaweed
+down-test-container:
+	cd docker/learn-compose/
+	docker compose down 
 
-seaweed-logs:
-	@echo "Logging to 'gen2-seaweedfs'..."
-	docker logs gen2-seaweedfs
+restart-test-container: down-test-container up-test-container
+	cd docker/learn-compose/
+	docker compose logs -f
 
-learn:
-	@echo "Starting learning container..."
-	docker-compose -f docker/learn-env/docker-compose.yml up
-
-learn-down:
-	@echo "Stopping learning container..."
-	docker-compose -f docker/learn-env/docker-compose.yml down
-
-learn-restart: 
-	seaweed-down seaweed
-
+rebuild-test-container: down-test-container 
+	cd docker/learn-compose/
+	docker compose up -d --build
+	docker compose down
 

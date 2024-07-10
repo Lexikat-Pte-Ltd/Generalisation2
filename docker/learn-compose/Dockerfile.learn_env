@@ -3,5 +3,6 @@ FROM alpine:latest
 
 # Install Python
 RUN apk add --no-cache python3 py3-pip
+RUN pip3 install psutil --break-system-packages
 
 CMD ["tail", "-f", "/dev/null"]

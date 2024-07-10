@@ -6,3 +6,5 @@ tiktoken
 python-dotenv
 pydantic
 loguru
+plotext
+docker

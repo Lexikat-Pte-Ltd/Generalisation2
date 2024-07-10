@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel
+from textwrap import dedent
 
 
 class EnvironmentInfo(BaseModel):
@@ -23,3 +24,30 @@ class EnvironmentInfo(BaseModel):
             total_storage=self.total_storage - other.total_storage,
             available_storage=self.available_storage - other.available_storage,
         )
+
+    def __str__(self):
+        return dedent(f"""
+        From `free -m` :
+        - total_system_memory: {self.total_system_memory}
+        - available_system_memory: {self.available_system_memory}
+        - running_memory: {self.running_memory}
+        From `df -m /` : 
+        - total_storage: {self.total_storage}
+        - available_storage: {self.available_storage}
+        """)
+
+    def files_are_deleted(self, fresh_env_info: EnvironmentInfo):
+        """Assume self as the oldest object.
+
+        Args:
+            fresh_env_info (EnvironmentInfo): Freshest environment info.
+
+        Returns:
+            bool: If files are indeed managed to be deleted
+        """
+        available_storage = self.available_storage - fresh_env_info.available_storage
+
+        if available_storage >= 0:
+            return False
+        else:
+            return True

@@ -1,9 +1,0 @@
-version: '3'
-
-services:
-  learn-env:
-    tty: true
-    build:
-      context: .
-      dockerfile: Dockerfile.learn_env
-    container_name: gen2-learn
