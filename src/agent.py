@@ -1,7 +1,7 @@
 import copy
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
 from loguru import logger
 from openai import OpenAI
@@ -20,7 +20,7 @@ from src.prep import (
     prep_special_env_plist_oai,
     prep_stratgen_plist_oai,
 )
-from src.gen import unused_gen_code_oai, unused_gen_strats_oai
+from src.gen import gen_code, gen_strats
 from src.types import Message, TaggedMessage
 from src.container import run_code_in_con
 
@@ -74,14 +74,21 @@ class EnvAgent:
         """
         return to_normal_plist(self.tagged_chat_history)
 
-    def log_tagged_chat_history(self) -> None:
-        """Use this to print chat history"""
+    def log_tagged_chat_history(self, context: str | None = None) -> None:
+        """Use this to print tagged chat history
+
+        Args:
+            context (str | None, optional): Extra log before the chat history. Defaults to None.
+        """
+
+        if context is not None:
+            logger.info(context)
 
         logger.info(format_tagged_history(self.tagged_chat_history))
 
     def gen_special_env_code(
         self,
-        oai_client: OpenAI,
+        genner: Callable,
         docker_client: DockerClient,
         testing_container_id: str,
         max_attempts: int = 5,
@@ -103,7 +110,7 @@ class EnvAgent:
         temp_chat_history = copy.deepcopy(self.tagged_chat_history)
 
         for attempt in range(max_attempts):
-            code = unused_gen_code_oai(oai_client, to_normal_plist(temp_chat_history))
+            code = gen_code(genner, to_normal_plist(temp_chat_history))
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
@@ -253,7 +260,7 @@ class CommonAgent:
 
         logger.info(format_tagged_history(self.tagged_chat_history))
 
-    def gen_strats(self, oai_client: OpenAI) -> List[str]:
+    def gen_strats(self, genner: Callable) -> List[str]:
         """Given an OAI client, will generate strategies based on the current chat history
         containing system prompt, initial environment info, and special environment info found by
         executing special environment info getters on a specified container.
@@ -265,7 +272,7 @@ class CommonAgent:
             strategies: List of string that are strategies.
         """
 
-        return unused_gen_strats_oai(oai_client, self.chat_history)
+        return gen_strats(genner, self.tagged_chat_history)
 
     def update_strat_state(self, strats: List[str], tag="strats_reply") -> str:
         """Given a newly generated strategies, will process the strategies so that it is appendable

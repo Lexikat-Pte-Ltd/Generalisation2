@@ -2,7 +2,7 @@ from copy import deepcopy
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Literal, cast, get_args
 
 import docker
 from dotenv import load_dotenv
@@ -20,31 +20,38 @@ from src.prep import (
     prep_special_env_codegen_plist_oai,
     prep_strat_codegen_plist_oai,
 )
-from src.gen import unused_gen_code_oai
+from src.gen import create_genner, gen_code
 from src.agent import EnvAgent, CommonAgent
 
 load_dotenv()
 
-if __name__ == "__main__":
-    container_id = "learn-compose-main-1"
+CONTAINER_ID = "learn-compose-main-1"
+BACKEND = cast(Literal["oai", "deepseek"], os.getenv("BACKEND") or "oai")
+OAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+if BACKEND == "oai":
+    assert OAI_API_KEY is not None
+
+oai_client = OpenAI(api_key=OAI_API_KEY)
+docker_client = docker.from_env()
+
+genner = create_genner(BACKEND)
+
+
+def main():
     # Intiate both docker and openai clients
-    docker_client = docker.from_env()
-    oai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # Out container path for saving purposes
-    out_con_path = Path("./data/controller/")
     # In container path for work path purposes
     in_con_path = Path("/")
     # In con folders for adding context to environment data getting
     in_con_folders = safe_folderlist_bfs(
-        client=docker_client, container_id=container_id, path=in_con_path
+        client=docker_client, container_id=CONTAINER_ID, path=in_con_path
     )
     # Filtering so that context size doesnt grow too much
     smol_in_con_folders = in_con_folders[:25] + ["..."] + in_con_folders[-1:]
 
     # Get basic initial env info
-    initial_basic_env_info = safe_detect_env(docker_client, container_id)
+    initial_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
 
     # Initiate env agent
     env_agent = EnvAgent(
@@ -56,9 +63,9 @@ if __name__ == "__main__":
         env_agent.tagged_chat_history += prep_special_env_codegen_plist_oai(in_con_path)
 
         env_getter_code, succeed = env_agent.gen_special_env_code(
-            oai_client=oai_client,
+            genner=genner,
             docker_client=docker_client,
-            testing_container_id=container_id,
+            testing_container_id=CONTAINER_ID,
         )
 
         # If special environment getters generation process failed
@@ -71,7 +78,7 @@ if __name__ == "__main__":
 
     # Execute all env getting codes that has obtained
     initial_special_env_infos = env_agent.execute_special_env_infos(
-        docker_client=docker_client, container_id=container_id
+        docker_client=docker_client, container_id=CONTAINER_ID
     )
 
     # 3000 lines.txt behavior
@@ -89,7 +96,7 @@ if __name__ == "__main__":
     )
 
     # Generate strats based on the new env infos
-    strats = common_agent.gen_strats(oai_client)
+    strats = common_agent.gen_strats(genner)
     common_agent.log_tagged_chat_history()
 
     # Strat deletion strats :
@@ -110,9 +117,9 @@ if __name__ == "__main__":
         strat_focused_common_agent = deepcopy(common_agent)
 
         # Get fresh env info
-        starting_basic_env_info = safe_detect_env(docker_client, container_id)
+        starting_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
         starting_special_env_infos: List[str] = env_agent.execute_special_env_infos(
-            docker_client=docker_client, container_id=container_id
+            docker_client=docker_client, container_id=CONTAINER_ID
         )
 
         # Update the env info state of the common agent with the 2 fresh env infos
@@ -128,7 +135,7 @@ if __name__ == "__main__":
 
         # Gen some codes
         for attempt in range(3):
-            code: str = unused_gen_code_oai(oai_client, common_agent.chat_history)
+            code: str = gen_code(genner, common_agent.chat_history)
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
@@ -158,7 +165,7 @@ if __name__ == "__main__":
                 continue
 
             exit_code, execution_output = run_code_in_con(
-                docker_client, container_id, code
+                docker_client, CONTAINER_ID, code
             )
             if exit_code != 0:
                 logger.error(
@@ -172,7 +179,7 @@ if __name__ == "__main__":
                 )
                 continue
 
-            fresh_basic_env_info = safe_detect_env(docker_client, container_id)
+            fresh_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
             files_are_deleted = starting_basic_env_info.files_are_deleted(
                 fresh_basic_env_info
             )
@@ -204,3 +211,7 @@ if __name__ == "__main__":
                 "Code loop is done for the strat {strat} on {attempt}-th iteration."
             )
             logger.info("Continuing to next strat if exists...")
+
+
+if __name__ == "__main__":
+    main()

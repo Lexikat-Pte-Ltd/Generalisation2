@@ -7,7 +7,8 @@ from openai import OpenAI
 import requests
 
 from src.config import DeepseekConfig, OAIConfig
-from src.types import Message
+from src.helper import to_normal_plist
+from src.types import Message, TaggedMessage
 
 DEEPSEEK_TEMPLATE = """
 {% if not add_generation_prompt is defined %}
@@ -42,7 +43,7 @@ DEEPSEEK_TEMPLATE = """
 """
 
 
-def create_deepseek_genner(
+def _create_deepseek_genner(
     config: DeepseekConfig,
 ) -> Callable[[List[Message], str], str]:
     def genner(messages: List[Message], prefill="") -> str:
@@ -73,7 +74,7 @@ def create_deepseek_genner(
     return genner
 
 
-def create_oai_genner(
+def _create_oai_genner(
     client: OpenAI, config: OAIConfig
 ) -> Callable[[List[Message], str], str]:
     def genner(messages: List[Message], prefill="") -> str:
@@ -103,11 +104,11 @@ def create_genner(
     oai_client: OpenAI | None = None,
 ) -> Callable[[List[Message], str], str]:
     if backend == "deepseek":
-        return create_deepseek_genner(deepseek_config)
+        return _create_deepseek_genner(deepseek_config)
     elif backend == "oai":
         if not oai_client:
             raise ValueError("OpenAI client is required for OAI backend")
-        return create_oai_genner(oai_client, oai_config)
+        return _create_oai_genner(oai_client, oai_config)
 
 
 def gen_response(
@@ -143,9 +144,13 @@ def gen_code(
 
 
 def gen_strats(
-    genner: Callable[[List[Message], str], str], messages: List[Message]
+    genner: Callable[[List[Message], str], str], messages: List[TaggedMessage]
 ) -> List[str]:
-    response = gen_response(genner, messages, "list", "{'list':")
+    assert (
+        messages[-1][1] == "strat_request"
+    ), "The latest chat message tag must match 'strat_request'"
+
+    response = gen_response(genner, to_normal_plist(messages), "list", "{'list':")
 
     try:
         assert isinstance(response, list)
