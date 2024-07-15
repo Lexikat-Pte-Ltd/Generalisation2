@@ -38,9 +38,9 @@ def prep_system_plist_oai(
 # {"role": "user"}
 BASIC_ENV_INFOS_INCLUSION_TEMPLATE = """
 Here's also an additional environment information that you can use to aid you in this process, encoded in \"EnvInfo\" XML tag, those are
-<EnvInfo>
-{env_info}
-</EnvInfo>
+<BasicEnvInfo>
+{basic_env_info}
+</BasicEnvInfo>
 """
 
 
@@ -124,12 +124,12 @@ def prep_stratgen_plist_oai(
 
 
 SPECIAL_ENV_CODEGEN_TEMPLATE = """
-Given the previous context, generate python code for obtaining special environment description that is going to assists you with tasks defined in the system propmt.
+Given the previous context, generate python code for obtaining special environment description that is going to assists you with tasks defined in the system prompt.
 You are working in the directory of {in_con_path}.
 Be original, unique, and create other information that has yet existed in the previous environment info.
 Also use default python library and nothing else.
 Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}. 
-The code are expected to print out string to stdout containing environment information information.
+The code are expected to print out string to stdout containing environment information.
 If there is another code you have previously generated, be different and unique to the previous one.
 DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`for without installing another new library.
 """.strip()

@@ -2,6 +2,7 @@ from copy import deepcopy
 from datetime import datetime
 import os
 from pathlib import Path
+from typing import List
 
 import docker
 from dotenv import load_dotenv
@@ -12,19 +13,14 @@ from src.code import is_valid_code_ast, is_valid_code_compiler
 from src.container import (
     run_code_in_con,
     safe_detect_env,
-    safe_filelist,
     safe_folderlist_bfs,
 )
 from src.prep import (
     prep_regen_plist_oai,
     prep_special_env_codegen_plist_oai,
     prep_strat_codegen_plist_oai,
-    prep_stratgen_plist_oai,
-    prep_special_env_codegen_plist_oai,
 )
-from src.gen import gen_code_oai
-from src.looper import run_strategy
-from src.helper import to_normal_plist
+from src.gen import unused_gen_code_oai
 from src.agent import EnvAgent, CommonAgent
 
 load_dotenv()
@@ -78,6 +74,9 @@ if __name__ == "__main__":
         docker_client=docker_client, container_id=container_id
     )
 
+    # 3000 lines.txt behavior
+    # env_agent.special_env_infos_history += initial_special_env_infos
+
     # Update env_agent's state
     env_agent.cur_sp_env_infos = initial_special_env_infos
     env_agent.log_tagged_chat_history()
@@ -93,6 +92,12 @@ if __name__ == "__main__":
     strats = common_agent.gen_strats(oai_client)
     common_agent.log_tagged_chat_history()
 
+    # Strat deletion strats :
+    # 1. Regex or using BERT to remove similar strats that had been worked with before
+    # 2. Start from last to beginning
+    # 3. Prompt engineering to tell it to avoid to generate previously generated strats
+    # 4. Soft prompting
+
     # For every strat, we
     # 1. Copy the common agent
     # 2. Refresh basic env info and special env info
@@ -100,12 +105,13 @@ if __name__ == "__main__":
     # 4. Generate codes to free up spaces
     # 5. Save the code whether if it succeed or not
     for strat in strats:
+        logger.info("Code loop started on strat {strat}...")
         # Copy the agent
         strat_focused_common_agent = deepcopy(common_agent)
 
         # Get fresh env info
         starting_basic_env_info = safe_detect_env(docker_client, container_id)
-        starting_special_env_infos = env_agent.execute_special_env_infos(
+        starting_special_env_infos: List[str] = env_agent.execute_special_env_infos(
             docker_client=docker_client, container_id=container_id
         )
 
@@ -119,9 +125,10 @@ if __name__ == "__main__":
         common_agent.tagged_chat_history += prep_strat_codegen_plist_oai(
             task_description=strat
         )
+
         # Gen some codes
         for attempt in range(3):
-            code: str = gen_code_oai(oai_client, common_agent.chat_history)
+            code: str = unused_gen_code_oai(oai_client, common_agent.chat_history)
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
@@ -135,7 +142,9 @@ if __name__ == "__main__":
                     run_context="a Python AST compiler",
                 )
                 continue
+
             compile_valid, compiler_error = is_valid_code_compiler(code)
+
             if not compile_valid:
                 logger.error(
                     f"Native `compile` error - Attempt number {attempt + 1} - \n{compiler_error}"
@@ -190,3 +199,8 @@ if __name__ == "__main__":
             env_agent.save_tagged_chat_history_to_json(
                 identifier=formatted_datetime, folder="data/learned_skills/"
             )
+
+            logger.info(
+                "Code loop is done for the strat {strat} on {attempt}-th iteration."
+            )
+            logger.info("Continuing to next strat if exists...")

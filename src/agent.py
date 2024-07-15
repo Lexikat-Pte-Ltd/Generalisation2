@@ -1,8 +1,7 @@
 import copy
 import json
 from pathlib import Path
-from pprint import pformat
-from typing import Dict, List, Tuple, Any, cast
+from typing import List, Tuple
 
 from loguru import logger
 from openai import OpenAI
@@ -18,11 +17,10 @@ from src.prep import (
     prep_basic_env_plist_oai,
     prep_regen_plist_oai,
     prep_system_plist_oai,
-    prep_special_env_codegen_plist_oai,
     prep_special_env_plist_oai,
     prep_stratgen_plist_oai,
 )
-from src.gen import gen_env_code_oai, gen_strategies_oai
+from src.gen import unused_gen_code_oai, unused_gen_strats_oai
 from src.types import Message, TaggedMessage
 from src.container import run_code_in_con
 
@@ -56,9 +54,10 @@ class EnvAgent:
         self.sp_env_info_getter_codes: List[str] = []
         self.tagged_chat_history: List[TaggedMessage] = []
 
+        # TODO: Change this to have history behavior
         self.cur_basic_env_info = initial_basic_env_info
-
         self.cur_sp_env_infos: List[str] = []
+
         self.in_con_path = in_con_path
 
         self.tagged_chat_history += prep_system_plist_oai(in_con_path=str(in_con_path))
@@ -104,7 +103,7 @@ class EnvAgent:
         temp_chat_history = copy.deepcopy(self.tagged_chat_history)
 
         for attempt in range(max_attempts):
-            code: str = gen_env_code_oai(oai_client, to_normal_plist(temp_chat_history))
+            code = unused_gen_code_oai(oai_client, to_normal_plist(temp_chat_history))
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
@@ -266,7 +265,7 @@ class CommonAgent:
             strategies: List of string that are strategies.
         """
 
-        return gen_strategies_oai(oai_client, self.chat_history)
+        return unused_gen_strats_oai(oai_client, self.chat_history)
 
     def update_strat_state(self, strats: List[str], tag="strats_reply") -> str:
         """Given a newly generated strategies, will process the strategies so that it is appendable

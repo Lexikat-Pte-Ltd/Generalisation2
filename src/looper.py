@@ -3,10 +3,9 @@ from pathlib import Path
 from typing import Dict, List, Any
 
 from docker import DockerClient
-from loguru import logger
 from openai import OpenAI
 
-from src.types import TaggedMessage, Message
+from src.types import TaggedMessage
 
 
 def save_tagged_history_openai(
