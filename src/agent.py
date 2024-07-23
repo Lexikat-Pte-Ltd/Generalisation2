@@ -11,14 +11,15 @@ from src.code import (
     is_valid_code_ast,
     is_valid_code_compiler,
 )
-from src.helper import format_tagged_history, to_normal_plist
+from src.helper import format_tch, to_normal_plist
 from src.data import EnvironmentInfo
 from src.prep import (
-    prep_basic_env_plist_oai,
-    prep_regen_plist_oai,
-    prep_system_plist_oai,
-    prep_special_env_plist_oai,
-    prep_stratgen_plist_oai,
+    get_basic_env_plist,
+    get_regen_plist,
+    get_strat_gen_plist,
+    get_system_plist,
+    get_special_env_plist,
+    get_strat_code_gen_plist,
 )
 from src.gen import gen_code, gen_strats
 from src.types import Message, TaggedMessage
@@ -54,14 +55,13 @@ class EnvAgent:
         self.sp_env_info_getter_codes: List[str] = []
         self.tagged_chat_history: List[TaggedMessage] = []
 
-        # TODO: Change this to have history behavior
-        self.cur_basic_env_info = initial_basic_env_info
-        self.cur_sp_env_infos: List[str] = []
+        self.basic_env_info_history = [initial_basic_env_info]
+        self.sp_env_infos_history: List[str] = []
 
         self.in_con_path = in_con_path
 
-        self.tagged_chat_history += prep_system_plist_oai(in_con_path=str(in_con_path))
-        self.tagged_chat_history += prep_basic_env_plist_oai(
+        self.tagged_chat_history += get_system_plist(in_con_path=str(in_con_path))
+        self.tagged_chat_history += get_basic_env_plist(
             basic_env_info=str(initial_basic_env_info)
         )
 
@@ -74,17 +74,32 @@ class EnvAgent:
         """
         return to_normal_plist(self.tagged_chat_history)
 
-    def log_tagged_chat_history(self, context: str | None = None) -> None:
-        """Use this to print tagged chat history
+    def debug_log_tch(self, context: str = "Logging ") -> None:
+        """Use this to log tagged chat history
 
         Args:
-            context (str | None, optional): Extra log before the chat history. Defaults to None.
+            context (str, optional): Extra log before the main log.
         """
 
         if context is not None:
-            logger.info(context)
+            logger.debug(context)
 
-        logger.info(format_tagged_history(self.tagged_chat_history))
+        logger.debug(format_tch(self.tagged_chat_history))
+
+    def debug_log_eih(
+        self, context: str = "Logging environment agent's info history..."
+    ) -> None:
+        """Use this to log env info histories
+
+        Args:
+            context (str, optional): Extra log before the main log.
+        """
+
+        if context is not None:
+            logger.debug(context)
+
+        logger.debug(f"Basic Env Info History - \n{self.basic_env_info_history}")
+        logger.debug(f"Special Env Info History - \n{self.basic_env_info_history}")
 
     def gen_special_env_code(
         self,
@@ -107,17 +122,29 @@ class EnvAgent:
         Returns:
             Tuple[str, bool]: Generated code and success status.
         """
-        temp_chat_history = copy.deepcopy(self.tagged_chat_history)
+        temp_tagged_chat_history = copy.deepcopy(self.tagged_chat_history)
+
+        assert temp_tagged_chat_history[0][1] == "system_prompt"
+        assert temp_tagged_chat_history[1][1] == "basic_env_facilitation"
+        assert temp_tagged_chat_history[2][1] == "env_codegen_request"
+
+        logger.debug(
+            f"Temp tagged chat history - \n {format_tch(temp_tagged_chat_history)}"
+        )
 
         for attempt in range(max_attempts):
-            code = gen_code(genner, to_normal_plist(temp_chat_history))
+            logger.info(
+                f"Temp chat history - \n {to_normal_plist(temp_tagged_chat_history)}"
+            )
+
+            code = gen_code(genner, to_normal_plist(temp_tagged_chat_history))
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
                 logger.error(
                     f"AST error - Attempt number {attempt + 1} - \n{ast_error}"
                 )
-                temp_chat_history += prep_regen_plist_oai(
+                temp_tagged_chat_history += get_regen_plist(
                     task_description="Generate and test code for getting non-basic environment info",
                     prev_code=code,
                     error_context=ast_error,
@@ -130,7 +157,7 @@ class EnvAgent:
                 logger.error(
                     f"Native `compile` error - Attempt number {attempt + 1} - \n{compiler_error}"
                 )
-                temp_chat_history += prep_regen_plist_oai(
+                temp_tagged_chat_history += get_regen_plist(
                     task_description="Generate and test code for getting non-basic environment info",
                     prev_code=code,
                     error_context=ast_error,
@@ -145,7 +172,7 @@ class EnvAgent:
                 logger.error(
                     f"In container error - Attempt number {attempt + 1} - \n{execution_output}"
                 )
-                temp_chat_history += prep_regen_plist_oai(
+                temp_tagged_chat_history += get_regen_plist(
                     task_description="Generate and test code for getting non-basic environment info",
                     prev_code=code,
                     error_context=execution_output,
@@ -214,8 +241,8 @@ class CommonAgent:
 
     def __init__(
         self,
-        initial_basic_env_info: EnvironmentInfo,
-        initial_special_env_infos: List[str],
+        basic_env_info_history: List[EnvironmentInfo],
+        sp_env_info_history: List[str],
         in_con_path: str | Path,
     ):
         """Initialize a common agent to be used for strategies generation and space clearing code generation.
@@ -235,15 +262,15 @@ class CommonAgent:
         self.in_con_path = in_con_path
 
         # Add system prompt
-        self.tagged_chat_history += prep_system_plist_oai(
-            str(in_con_path), str(initial_basic_env_info)
+        self.tagged_chat_history.extend(
+            get_system_plist(str(in_con_path), str(basic_env_info_history))
         )
         # Add special env inclusion prompt
-        self.tagged_chat_history += prep_special_env_plist_oai(
-            special_env_infos=initial_special_env_infos
+        self.tagged_chat_history.extend(
+            get_special_env_plist(special_env_infos=sp_env_info_history)
         )
         # Add strategy gen prompt
-        self.tagged_chat_history += prep_stratgen_plist_oai(in_con_path=in_con_path)
+        self.tagged_chat_history.extend(get_strat_gen_plist(in_con_path=in_con_path))
 
     @property
     def chat_history(self) -> List[Message]:
@@ -255,10 +282,10 @@ class CommonAgent:
 
         return to_normal_plist(self.tagged_chat_history)
 
-    def log_tagged_chat_history(self) -> None:
+    def debug_log(self) -> None:
         """Use this to print chat history"""
 
-        logger.info(format_tagged_history(self.tagged_chat_history))
+        logger.debug(format_tch(self.tagged_chat_history))
 
     def gen_strats(self, genner: Callable) -> List[str]:
         """Given an OAI client, will generate strategies based on the current chat history
@@ -310,8 +337,8 @@ class CommonAgent:
         self,
         fresh_basic_env_info: EnvironmentInfo,
         fresh_special_env_infos: List[str],
-        basic_env_info_tag="basic_env_facilitation",
-        special_env_info_tag="special_env_facilitation",
+        basic_env_info_tag="get_basic_env_plist",
+        special_env_info_tag="get_special_env_plist",
     ) -> int:
         # For saving and historical purposes
         self.old_tagged_chat_histories.append(self.tagged_chat_history)
@@ -322,7 +349,7 @@ class CommonAgent:
             tag = self.tagged_chat_history[i][1]
 
             if tag == basic_env_info_tag:
-                self.tagged_chat_history[i] = prep_basic_env_plist_oai(
+                self.tagged_chat_history[i] = get_basic_env_plist(
                     str(fresh_basic_env_info)
                 )[0]
 
@@ -330,7 +357,7 @@ class CommonAgent:
 
                 continue
             elif tag == special_env_info_tag:
-                self.tagged_chat_history[i] = prep_special_env_plist_oai(
+                self.tagged_chat_history[i] = get_special_env_plist(
                     fresh_special_env_infos
                 )[0]
 
