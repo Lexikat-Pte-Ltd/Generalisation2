@@ -15,10 +15,11 @@ from src.container import (
     safe_detect_env,
     safe_folderlist_bfs,
 )
+from src.data import EnvironmentInfo
 from src.prep import (
-    prep_regen_plist_oai,
-    prep_special_env_codegen_plist_oai,
-    prep_strat_codegen_plist_oai,
+    get_regen_plist,
+    get_special_env_getter_code_gen_plist,
+    get_strat_code_gen_plist,
 )
 from src.gen import create_genner, gen_code
 from src.agent import EnvAgent, CommonAgent
@@ -51,16 +52,23 @@ def main():
     smol_in_con_folders = in_con_folders[:25] + ["..."] + in_con_folders[-1:]
 
     # Get basic initial env info
-    initial_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
+    logger.info("Initializing basic environment info.")
+    initial_basic_env_info: EnvironmentInfo = safe_detect_env(
+        docker_client, CONTAINER_ID
+    )
 
     # Initiate env agent
+    logger.info("Initializing environment agent.")
     env_agent = EnvAgent(
         initial_basic_env_info=initial_basic_env_info, in_con_path=in_con_path
     )
 
     # Generate 2 special env getter code
+    logger.info("Generating 2 special environment getter code...")
     for i in range(2):
-        env_agent.tagged_chat_history += prep_special_env_codegen_plist_oai(in_con_path)
+        env_agent.tagged_chat_history.extend(
+            get_special_env_getter_code_gen_plist(in_con_path)
+        )
 
         env_getter_code, succeed = env_agent.gen_special_env_code(
             genner=genner,
@@ -74,30 +82,37 @@ def main():
             raise Exception("Somehow `gen_special_env_getters` failed.")
 
         # Update (append) env_agent's state
+        logger.info(f"Appending env_agent with new env getter code @ {i} th iteration.")
         env_agent.append_new_code(env_getter_code)
 
+    logger.info("Done.")
+
     # Execute all env getting codes that has obtained
+    logger.info(
+        f"Executing all special environment info getter code on container {CONTAINER_ID} ..."
+    )
     initial_special_env_infos = env_agent.execute_special_env_infos(
         docker_client=docker_client, container_id=CONTAINER_ID
     )
-
-    # 3000 lines.txt behavior
-    # env_agent.special_env_infos_history += initial_special_env_infos
+    logger.info("Done.")
 
     # Update env_agent's state
-    env_agent.cur_sp_env_infos = initial_special_env_infos
-    env_agent.log_tagged_chat_history()
+    logger.info("Updating environment agent's state...")
+    env_agent.sp_env_infos_history.extend(initial_special_env_infos)
+    logger.info("Done.")
+    env_agent.debug_log_eih()
+    env_agent.debug_log_tch()
 
     # Intiiate common agent
     common_agent = CommonAgent(
-        initial_basic_env_info=env_agent.cur_basic_env_info,
-        initial_special_env_infos=env_agent.cur_sp_env_infos,
+        basic_env_info_history=env_agent.basic_env_info_history,
+        sp_env_info_history=env_agent.sp_env_infos_history,
         in_con_path=in_con_path,
     )
 
     # Generate strats based on the new env infos
     strats = common_agent.gen_strats(genner)
-    common_agent.log_tagged_chat_history()
+    common_agent.debug_log()
 
     # Strat deletion strats :
     # 1. Regex or using BERT to remove similar strats that had been worked with before
@@ -129,7 +144,7 @@ def main():
         logger.info("Number of updates on common agent env info's state {changes}")
 
         # Prepare the common agent chat history with prep prompts
-        common_agent.tagged_chat_history += prep_strat_codegen_plist_oai(
+        common_agent.tagged_chat_history += get_strat_code_gen_plist(
             task_description=strat
         )
 
@@ -142,7 +157,7 @@ def main():
                 logger.error(
                     f"AST error - Attempt number {attempt + 1} - \n{ast_error}"
                 )
-                common_agent.tagged_chat_history += prep_regen_plist_oai(
+                common_agent.tagged_chat_history += get_regen_plist(
                     task_description=f"Generate code to perform {strat}",
                     prev_code=code,
                     error_context=ast_error,
@@ -156,7 +171,7 @@ def main():
                 logger.error(
                     f"Native `compile` error - Attempt number {attempt + 1} - \n{compiler_error}"
                 )
-                common_agent.tagged_chat_history += prep_regen_plist_oai(
+                common_agent.tagged_chat_history += get_regen_plist(
                     task_description=f"Generate code to perform {strat}",
                     prev_code=code,
                     error_context=ast_error,
@@ -171,7 +186,7 @@ def main():
                 logger.error(
                     f"In container error - Attempt number {attempt + 1} - \n{execution_output}"
                 )
-                common_agent.tagged_chat_history += prep_regen_plist_oai(
+                common_agent.tagged_chat_history += get_regen_plist(
                     task_description=f"Generate code to perform {strat}",
                     prev_code=code,
                     error_context=execution_output,
@@ -188,7 +203,7 @@ def main():
                 logger.error(
                     f"No deleted files are detected- Attempt number {attempt + 1} - \n{execution_output}"
                 )
-                common_agent.tagged_chat_history += prep_regen_plist_oai(
+                common_agent.tagged_chat_history += get_regen_plist(
                     task_description=f"Generate code to perform {strat}",
                     prev_code=code,
                     error_context="No files are being freed or deleted",
