@@ -26,15 +26,13 @@ class EnvironmentInfo(BaseModel):
         )
 
     def __str__(self):
-        return dedent(f"""
-        From `free -m` :
+        return dedent(f"""From `free -m` :
         - total_system_memory: {self.total_system_memory}
         - available_system_memory: {self.available_system_memory}
         - running_memory: {self.running_memory}
         From `df -m /` : 
         - total_storage: {self.total_storage}
-        - available_storage: {self.available_storage}
-        """)
+        - available_storage: {self.available_storage} """)
 
     def files_are_deleted(self, fresh_env_info: EnvironmentInfo):
         """Assume self as the oldest object.

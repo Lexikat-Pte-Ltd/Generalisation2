@@ -65,7 +65,7 @@ Here's also an additional environment information that you can use to aid you in
 def get_basic_env_plist(
     basic_env_info: str,
     template=BASIC_ENV_INFO_INCLUSION_TEMPLATE,
-    tag="incl_basic_env_plist",
+    tag="get_basic_env_plist",
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, CommonAgent, ContextProvider)
 

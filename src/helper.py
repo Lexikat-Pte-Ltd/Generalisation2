@@ -1,12 +1,15 @@
+from loguru import logger
 from typing import List, Sequence
 from src.types import TaggedMessage, Message
 
 
 def to_normal_plist(tagplist: Sequence[TaggedMessage]) -> List[Message]:
-    return [tupl[0] for tupl in tagplist]
+    result = [tupl[0] for tupl in tagplist]
+
+    return result
 
 
-def format_tagged_history(tagged_chat_history: List[TaggedMessage]) -> str:
+def format_tch(tagged_chat_history: List[TaggedMessage]) -> str:
     """Use this to print tagged chat history"""
 
     to_print = "[\n"
@@ -24,8 +27,8 @@ def format_tagged_history(tagged_chat_history: List[TaggedMessage]) -> str:
     return to_print
 
 
-def format_history(chat_history: List[Message]) -> str:
-    """Use this to print tagged chat history"""
+def format_ch(chat_history: List[Message]) -> str:
+    """Use this to print chat history"""
 
     to_print = "[\n"
 
