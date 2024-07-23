@@ -5,7 +5,7 @@ class DeepseekConfig(NamedTuple):
     endpoint: str = "http://localhost:11434/api/generate"
     model: str = "deepseek-coder:6.7b"
     stream: bool = False
-    add_generation_prompt: bool = False
+    add_generation_prompt: bool = True
     bos_token: str = ""
     prefill_response: str = ""
 

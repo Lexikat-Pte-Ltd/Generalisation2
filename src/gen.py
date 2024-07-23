@@ -7,13 +7,12 @@ from openai import OpenAI
 import requests
 
 from src.config import DeepseekConfig, OAIConfig
-from src.helper import to_normal_plist
+from src.helper import format_ch, to_normal_plist
 from src.types import Message, TaggedMessage
 
-DEEPSEEK_TEMPLATE = """
-{% if not add_generation_prompt is defined %}
-{% set add_generation_prompt = false %}
-{% endif %}
+DEEPSEEK_TEMPLATE = """{%- if not add_generation_prompt is defined -%}
+{%- set add_generation_prompt = false -%}
+{%- endif -%}
 {%- set ns = namespace(found=false) -%}
 {%- for message in messages -%}
     {%- if message['role'] == 'system' -%}
@@ -35,12 +34,8 @@ DEEPSEEK_TEMPLATE = """
     {%- endif %}
 {%- endfor %}
 {% if add_generation_prompt %}
-{{'### Response:'}}
-    {% if prefill_response %}
-    {{ prefill_response }}
-    {% endif %}
-{% endif %} 
-"""
+{{'### Response:\\n'}}
+{%- endif -%}"""
 
 
 def _create_deepseek_genner(
@@ -56,17 +51,22 @@ def _create_deepseek_genner(
             prefill_response=prefill,
         )
 
+        logger.debug(f"Raw prompt - \n {prompt}")
+
         payload = {
             "model": config.model,
             "prompt": prompt,
             "stream": config.stream,
+            "format": "json",
             "raw": True,
         }
 
         try:
             response = requests.post(config.endpoint, json=payload)
+
             response.raise_for_status()
-            return config.prefill_response + response.json()["response"]
+
+            return response.json()["response"]
         except requests.RequestException as e:
             logger.error(f"API request failed: {str(e)}")
             raise
@@ -118,7 +118,10 @@ def gen_response(
     prefill: str,
 ) -> Any:
     try:
+        logger.debug(f"Messages - \n {format_ch(messages)}")
         response = genner(messages, prefill)
+
+        logger.debug(f"Response - \n {response}")
         response_json: Dict[str, str] = json.loads(response)
 
         if expected_key not in response_json:
@@ -146,10 +149,6 @@ def gen_code(
 def gen_strats(
     genner: Callable[[List[Message], str], str], messages: List[TaggedMessage]
 ) -> List[str]:
-    assert (
-        messages[-1][1] == "strat_request"
-    ), "The latest chat message tag must match 'strat_request'"
-
     response = gen_response(genner, to_normal_plist(messages), "list", "{'list':")
 
     try:
