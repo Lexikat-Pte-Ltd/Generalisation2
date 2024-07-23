@@ -1,14 +1,18 @@
 import json
-from typing import Any, Callable, Dict, List, Literal, cast
+from typing import Any, Callable, Dict, List, Literal, Tuple, cast, TypeAlias
+from urllib import response
 
 from jinja2 import Template
 from loguru import logger
+from numpy import isin
 from openai import OpenAI
 import requests
 
 from src.config import DeepseekConfig, OAIConfig
 from src.helper import format_ch, to_normal_plist
 from src.types import Message, TaggedMessage
+
+GennerType: TypeAlias = Callable[[List[Message]], str]
 
 DEEPSEEK_TEMPLATE = """{%- if not add_generation_prompt is defined -%}
 {%- set add_generation_prompt = false -%}
@@ -40,15 +44,14 @@ DEEPSEEK_TEMPLATE = """{%- if not add_generation_prompt is defined -%}
 
 def _create_deepseek_genner(
     config: DeepseekConfig,
-) -> Callable[[List[Message], str], str]:
-    def genner(messages: List[Message], prefill="") -> str:
+) -> GennerType:
+    def genner(messages: List[Message]) -> str:
         template = Template(DEEPSEEK_TEMPLATE)
 
         prompt = template.render(
             messages=messages,
             add_generation_prompt=config.add_generation_prompt,
             bos_token=config.bos_token,
-            prefill_response=prefill,
         )
 
         logger.debug(f"Raw prompt - \n {prompt}")
@@ -74,10 +77,8 @@ def _create_deepseek_genner(
     return genner
 
 
-def _create_oai_genner(
-    client: OpenAI, config: OAIConfig
-) -> Callable[[List[Message], str], str]:
-    def genner(messages: List[Message], prefill="") -> str:
+def _create_oai_genner(client: OpenAI, config: OAIConfig) -> GennerType:
+    def genner(messages: List[Message]) -> str:
         try:
             response = client.chat.completions.create(
                 model=config.model,
@@ -102,7 +103,7 @@ def create_genner(
     deepseek_config: DeepseekConfig = DeepseekConfig(),
     oai_config: OAIConfig = OAIConfig(),
     oai_client: OpenAI | None = None,
-) -> Callable[[List[Message], str], str]:
+) -> GennerType:
     if backend == "deepseek":
         return _create_deepseek_genner(deepseek_config)
     elif backend == "oai":
@@ -111,23 +112,24 @@ def create_genner(
         return _create_oai_genner(oai_client, oai_config)
 
 
-def gen_response(
-    genner: Callable[[List[Message], str], str],
+def gen_json_response(
+    genner: GennerType,
     messages: List[Message],
     expected_key: str,
-    prefill: str,
-) -> Any:
+) -> Tuple[str | List[str], str]:
     try:
         logger.debug(f"Messages - \n {format_ch(messages)}")
-        response = genner(messages, prefill)
+        raw_response = genner(messages)
 
-        logger.debug(f"Response - \n {response}")
-        response_json: Dict[str, str] = json.loads(response)
+        logger.debug(f"Raw Response - \n {raw_response}")
+        response_json: Dict[str, str | List[str]] = json.loads(raw_response)
 
         if expected_key not in response_json:
-            raise KeyError(f"Expected key '{expected_key}' not found in response")
+            raise KeyError(
+                f"Expected key '{expected_key}' not found in generated response"
+            )
 
-        return response_json[expected_key]
+        return response_json[expected_key], raw_response
     except json.JSONDecodeError:
         logger.error("Failed to decode JSON response")
         raise
@@ -136,26 +138,26 @@ def gen_response(
         raise
 
 
-def gen_code(
-    genner: Callable[[List[Message], str], str], messages: List[Message]
-) -> str:
-    response = gen_response(genner, messages, "code", "{'code':")
+def gen_code(genner: GennerType, messages: List[Message]) -> Tuple[str, str]:
+    clean_response, json_response = gen_json_response(genner, messages, "code")
 
-    assert isinstance(response, str)
+    assert isinstance(clean_response, str)
 
-    return response
+    return clean_response, json_response
 
 
-def gen_strats(
-    genner: Callable[[List[Message], str], str], messages: List[TaggedMessage]
-) -> List[str]:
-    response = gen_response(genner, to_normal_plist(messages), "list", "{'list':")
+def gen_list(
+    genner: GennerType, messages: List[TaggedMessage]
+) -> Tuple[List[str], str]:
+    clean_response, json_response = gen_json_response(
+        genner, to_normal_plist(messages), "list"
+    )
 
     try:
-        assert isinstance(response, list)
-        assert all(isinstance(item, str) for item in response)
+        assert isinstance(clean_response, list)
+        assert all(isinstance(item, str) for item in clean_response)
 
-        return response
+        return clean_response, json_response
     except AssertionError:
         logger.error("Failed making sure that generated strats are typed `List[str]`")
         raise

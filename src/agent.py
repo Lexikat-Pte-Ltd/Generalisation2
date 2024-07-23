@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Callable, List, Tuple
 
 from loguru import logger
-from openai import OpenAI
 from docker import DockerClient
 
 from src.code import (
@@ -19,9 +18,8 @@ from src.prep import (
     get_strat_gen_plist,
     get_system_plist,
     get_special_env_plist,
-    get_strat_code_gen_plist,
 )
-from src.gen import gen_code, gen_strats
+from src.gen import gen_code, gen_list
 from src.types import Message, TaggedMessage
 from src.container import run_code_in_con
 
@@ -137,7 +135,9 @@ class EnvAgent:
                 f"Temp chat history - \n {to_normal_plist(temp_tagged_chat_history)}"
             )
 
-            code = gen_code(genner, to_normal_plist(temp_tagged_chat_history))
+            code, raw_response = gen_code(
+                genner, to_normal_plist(temp_tagged_chat_history)
+            )
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
@@ -287,7 +287,7 @@ class CommonAgent:
 
         logger.debug(format_tch(self.tagged_chat_history))
 
-    def gen_strats(self, genner: Callable) -> List[str]:
+    def gen_strats(self, genner: Callable) -> Tuple[List[str], str]:
         """Given an OAI client, will generate strategies based on the current chat history
         containing system prompt, initial environment info, and special environment info found by
         executing special environment info getters on a specified container.
@@ -299,7 +299,7 @@ class CommonAgent:
             strategies: List of string that are strategies.
         """
 
-        return gen_strats(genner, self.tagged_chat_history)
+        return gen_list(genner, self.tagged_chat_history)
 
     def update_strat_state(self, strats: List[str], tag="strats_reply") -> str:
         """Given a newly generated strategies, will process the strategies so that it is appendable
