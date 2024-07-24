@@ -18,11 +18,12 @@ You are tasked with 3 distinct tasks, encoded in \"Tasks\" XML tag, these are
 </Tasks>
 """.strip()
 
+SYSTEM_PLIST_TAG = "system_plist"
+
 
 def get_system_plist(
     in_con_path: str,
-    system_template=SYSTEM_TEMPLATE,
-    tag="get_system_plist",
+    tag=SYSTEM_PLIST_TAG,
 ) -> List[TaggedMessage]:
     """(System, Env, Basic)
 
@@ -39,13 +40,12 @@ def get_system_plist(
 
     Args:
         in_con_path (str): In container path.
-        template (str, optional): System template.
         tag (str, optional): Tag to identify the only message in plist.
 
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    system_prompt = system_template.format(
+    system_prompt = SYSTEM_TEMPLATE.format(
         in_con_path=in_con_path,  #
     )
 
@@ -61,11 +61,12 @@ Here's also an additional environment information that you can use to aid you in
 </BasicEnvInfo>
 """.strip()
 
+BASIC_ENV_PLIST_TAG = "get_basic_env_plist"
+
 
 def get_basic_env_plist(
     basic_env_info: str,
-    template=BASIC_ENV_INFO_INCLUSION_TEMPLATE,
-    tag="get_basic_env_plist",
+    tag=BASIC_ENV_PLIST_TAG,
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, CommonAgent, ContextProvider)
 
@@ -83,13 +84,14 @@ def get_basic_env_plist(
 
     Args:
         basic_env_info (str): Initial or basic environment info.
-        template (str, optional): Inclusion template.
         tag (str, optional): Tag to identify the only message in plist.
 
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    inclusion_prompt = template.format(basic_env_info=basic_env_info)
+    inclusion_prompt = BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+        basic_env_info=basic_env_info
+    )
 
     return [
         ({"role": "user", "content": inclusion_prompt}, tag),
@@ -109,13 +111,13 @@ SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE = """
 </SpecialEnvInfo>
 """.strip()
 
+SPECIAL_ENV_PLIST_TAG = "get_special_env_plist"
+
 
 # Used by basic agent
 def get_special_env_plist(
     special_env_infos: List[str],
-    template_plural=PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE,
-    template_singular=SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE,
-    tag="get_special_env_plist",
+    tag=SPECIAL_ENV_PLIST_TAG,
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, CommonAgent, ContextProvider)
 
@@ -147,8 +149,6 @@ def get_special_env_plist(
 
     Args:
         special_env_info (str): Special env info from docker execution.
-        template_plural (str, optional): Prompt template for all the special env info.
-        template_singular (str, optional): Prompt template for single special env info.
         tag (str, optional): Tag to identify the only message in plist.
 
     Returns:
@@ -157,9 +157,13 @@ def get_special_env_plist(
     wrapped_env_infos = []
 
     for env_info in special_env_infos:
-        wrapped_env_infos.append(template_singular.format(special_env_info=env_info))
+        wrapped_env_infos.append(
+            SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
+                special_env_info=env_info
+            )
+        )
 
-    inclusion_prompt = template_plural.format(
+    inclusion_prompt = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
         special_env_infos="".join(wrapped_env_infos)
     )
 
@@ -168,16 +172,16 @@ def get_special_env_plist(
     ]
 
 
-STRAT_GEN_TEMPLATE = """
+STRAT_REQ_TEMPLATE = """
 Given the previous context, generate a few specific potential strategies as an AI agent to achieve freeing up some disk space for the directory `{in_con_path}`. 
 Please generate the task in JSON list exactly formatted like {{"list": ["strategy1", "strategy2", ... "strategyN"]}}. 
 """.strip()
+STRAT_REQ_PLIST_TAG = "get_strat_req_plist"
 
 
-def get_strat_gen_plist(
+def get_strat_req_plist(
     in_con_path: str | Path,
-    strat_template=STRAT_GEN_TEMPLATE,
-    tag="get_strat_gen_plist",
+    tag=STRAT_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
     """(User, CommonAgent, GenerationRequest, ListOutput)
 
@@ -202,7 +206,7 @@ def get_strat_gen_plist(
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    strat_prompt = strat_template.format(
+    strat_prompt = STRAT_REQ_TEMPLATE.format(
         in_con_path=in_con_path  #
     )
 
@@ -211,7 +215,7 @@ def get_strat_gen_plist(
     ]
 
 
-SPECIAL_ENV_GETTER_CODE_GEN_TEMPLATE = """
+SPECIAL_EGC_REQ_TEMPLATE = """
 Given the previous context, generate python code for obtaining special environment description that is going to assists you with tasks defined in the system prompt.
 You are working in the directory of {in_con_path}.
 Be original, unique, and create other information that has yet existed in the previous environment info.
@@ -221,17 +225,17 @@ The code are expected to print out string to stdout containing environment infor
 If there is another code you have previously generated, be different and unique to the previous one.
 DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`for without installing another new library.
 """.strip()
+SPECIAL_EGC_REQ_PLIST_TAG = "get_special_egc_req_plist"
 
 
 # Used by env agent
-def get_special_env_getter_code_gen_plist(
+def get_special_egc_req_plist(
     in_con_path: str | Path,
-    template=SPECIAL_ENV_GETTER_CODE_GEN_TEMPLATE,
-    tag="get_special_env_code_getter_gen_plist",
+    tag=SPECIAL_EGC_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, GenerationRequest, CodeOutput)
 
-    Get a plist for special env getter code generation.
+    Get a plist for special EGC (Environment Getter Code) generation request.
 
     ```
     On EnvAgent :
@@ -252,26 +256,29 @@ def get_special_env_getter_code_gen_plist(
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    special_env_code_getter_prompt = template.format(in_con_path=in_con_path)
+    special_env_code_getter_prompt = SPECIAL_EGC_REQ_TEMPLATE.format(
+        in_con_path=in_con_path
+    )
 
     return [
         ({"role": "user", "content": special_env_code_getter_prompt}, tag),
     ]
 
 
-STRAT_CODE_GEN_TEMPLATE = """
+STRAT_CODE_REQ_TEMPLATE = """
 Given the previous context, generate python code for the task \"{task_description}\".
 Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}. 
 DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`.
 Code :\n
 """.strip()
 
+STRAT_CODE_REQ_TAG = "get_strat_code_req_plist"
+
 
 # Used by basic agent
 def get_strat_code_gen_plist(
     task_description: str,
-    template=STRAT_CODE_GEN_TEMPLATE,
-    tag="get_strat_code_gen_plist",
+    tag=STRAT_CODE_REQ_TAG,
 ) -> List[TaggedMessage]:
     """(User, CommonAgent, GenerationRequest, CodeOutput)
 
@@ -296,7 +303,7 @@ def get_strat_code_gen_plist(
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    code_prompt = template.format(
+    code_prompt = STRAT_CODE_REQ_TEMPLATE.format(
         task_description=task_description  #
     )
 
@@ -314,16 +321,15 @@ DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run 
 Code :\n
 """.strip()
 
+USER_CODE_REGEN_TAG = "get_code_regen_plist"
+
 
 # Used by basic and env agent
-def get_regen_plist(
+def get_code_regen_plist(
     task_description: str,
-    prev_code: str,
     error_context: str,
     run_context: str,
-    regen_template=REGEN_TEMPLATE,
-    user_tag="get_regen_plist",
-    assi_tag="gen_code_failed",
+    user_tag=USER_CODE_REGEN_TAG,
 ) -> List[TaggedMessage]:
     """(User, CommonAgent, EnvAgent, GenerationRequest, CodeOutput)
 
@@ -333,8 +339,9 @@ def get_regen_plist(
     On CommonAgent and CommonAgent :
     [
         ...,
-        ({"role": "user", "content": "..."}, "gen_code_failed"),
-        > ({"role": "user", "content": "..."}, "get_regen_plist"),
+        ({"role": "user", "content": "..."}, "*REQ*"),
+        > ({"role": "assistant", "content": "..."}, ASSISTANT_REGEN_TAG),
+        > ({"role": "user", "content": "..."}, USER_REGEN_TAG),
         ({"role": "assistant", "content": "..."}, "gen_code"),
         ...,
     ]
@@ -342,25 +349,23 @@ def get_regen_plist(
 
     Args:
         task_description (str): Task/strat context for regen.
-        prev_code (str): Previous generated code.
+        asssitant_raw_response (str): Previously generated response by assistant.
         error_context (str): Error generated by previous code.
         run_context (str): Execution context of previous code
-        regen_template (_type_, optional): Regen template.
-        tag (str, optional): Tag to identify the gen request in plist.
-        failed_tag (str, optional): Tag to identify assistant's failed code in plist.
+        user_tag (str, optional): Tag to identify the regen request in plist.
+        assi_tag (str, optional): Tag to identify assistant's failed code in plist.
 
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    regen_prompts = regen_template.format(
+    regen_prompts = REGEN_TEMPLATE.format(
         task_description=task_description,
         error_context=error_context,
         run_context=run_context,
     )
 
     return [
-        ({"role": "assistant", "content": prev_code}, user_tag),
-        ({"role": "user", "content": regen_prompts}, assi_tag),
+        ({"role": "user", "content": regen_prompts}, user_tag),
     ]
 
 
@@ -370,7 +375,7 @@ def get_regen_plist(
 # With the difference of (Previous - Current):
 # {env_info_diff}
 # Please improve upon the code you have written by keeping in mind the error output above where task is {task_description}.
-# Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}. 
+# Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}.
 # DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`.
 # Code:\n
 # """.strip()

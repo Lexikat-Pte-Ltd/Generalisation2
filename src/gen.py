@@ -1,18 +1,15 @@
 import json
-from typing import Any, Callable, Dict, List, Literal, Tuple, cast, TypeAlias
-from urllib import response
+from typing import Any,  Dict, List, Literal, Tuple, cast
 
 from jinja2 import Template
 from loguru import logger
-from numpy import isin
 from openai import OpenAI
 import requests
 
 from src.config import DeepseekConfig, OAIConfig
 from src.helper import format_ch, to_normal_plist
-from src.types import Message, TaggedMessage
+from src.types import Message, TaggedMessage, GennerType
 
-GennerType: TypeAlias = Callable[[List[Message]], str]
 
 DEEPSEEK_TEMPLATE = """
 {%- if not add_generation_prompt is defined -%}

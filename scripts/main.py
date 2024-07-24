@@ -17,8 +17,8 @@ from src.container import (
 )
 from src.data import EnvironmentInfo
 from src.prep import (
-    get_regen_plist,
-    get_special_env_getter_code_gen_plist,
+    get_code_regen_plist,
+    get_special_egc_req_plist,
     get_strat_code_gen_plist,
 )
 from src.gen import create_genner, gen_code
@@ -28,6 +28,7 @@ load_dotenv()
 
 CONTAINER_ID = "learn-compose-main-1"
 BACKEND = cast(Literal["oai", "deepseek"], os.getenv("BACKEND") or "oai")
+assert BACKEND == "oai"
 OAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if BACKEND == "oai":
@@ -36,7 +37,7 @@ if BACKEND == "oai":
 oai_client = OpenAI(api_key=OAI_API_KEY)
 docker_client = docker.from_env()
 
-genner = create_genner(BACKEND)
+genner = create_genner(BACKEND, oai_client=oai_client)
 
 
 def main():
@@ -66,11 +67,9 @@ def main():
     # Generate 2 special env getter code
     logger.info("Generating 2 special environment getter code...")
     for i in range(2):
-        env_agent.tagged_chat_history.extend(
-            get_special_env_getter_code_gen_plist(in_con_path)
-        )
+        env_agent.tagged_chat_history.extend(get_special_egc_req_plist(in_con_path))
 
-        env_getter_code, succeed = env_agent.gen_special_env_code(
+        env_getter_code, succeed = env_agent.gen_sp_egc(
             genner=genner,
             docker_client=docker_client,
             testing_container_id=CONTAINER_ID,
@@ -85,34 +84,32 @@ def main():
         logger.info(f"Appending env_agent with new env getter code @ {i} th iteration.")
         env_agent.append_new_code(env_getter_code)
 
-    logger.info("Done.")
-
     # Execute all env getting codes that has obtained
     logger.info(
         f"Executing all special environment info getter code on container {CONTAINER_ID} ..."
     )
-    initial_special_env_infos = env_agent.execute_special_env_infos(
+    initial_special_env_infos = env_agent.execute_sp_env_infos(
         docker_client=docker_client, container_id=CONTAINER_ID
     )
-    logger.info("Done.")
 
     # Update env_agent's state
     logger.info("Updating environment agent's state...")
-    env_agent.sp_env_infos_history.extend(initial_special_env_infos)
-    logger.info("Done.")
-    env_agent.debug_log_eih()
-    env_agent.debug_log_tch()
+    env_agent.sp_env_info_history.extend(initial_special_env_infos)
 
     # Intiiate common agent
     common_agent = CommonAgent(
-        basic_env_info_history=env_agent.basic_env_info_history,
-        sp_env_info_history=env_agent.sp_env_infos_history,
+        basic_env_info_history=env_agent.bs_env_info_history,
+        sp_env_info_history=env_agent.sp_env_info_history,
         in_con_path=in_con_path,
     )
 
     # Generate strats based on the new env infos
-    strats = common_agent.gen_strats(genner)
+    strats, raw_strats = common_agent.gen_strats(genner)
     common_agent.debug_log()
+
+    env_agent.debug_log_bs_eih()
+    env_agent.debug_log_sp_eih()
+    env_agent.debug_log_tch()
 
     # Strat deletion strats :
     # 1. Regex or using BERT to remove similar strats that had been worked with before
@@ -133,7 +130,7 @@ def main():
 
         # Get fresh env info
         starting_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
-        starting_special_env_infos: List[str] = env_agent.execute_special_env_infos(
+        starting_special_env_infos: List[str] = env_agent.execute_sp_env_infos(
             docker_client=docker_client, container_id=CONTAINER_ID
         )
 
@@ -150,16 +147,18 @@ def main():
 
         # Gen some codes
         for attempt in range(3):
-            code: str = gen_code(genner, common_agent.chat_history)
+            code, raw_response = gen_code(genner, common_agent.chat_history)
+            common_agent.tagged_chat_history += [
+                ({"role": "assistant", "content": raw_response}, "gen_sp_egc")
+            ]
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
                 logger.error(
                     f"AST error - Attempt number {attempt + 1} - \n{ast_error}"
                 )
-                common_agent.tagged_chat_history += get_regen_plist(
+                common_agent.tagged_chat_history += get_code_regen_plist(
                     task_description=f"Generate code to perform {strat}",
-                    prev_code=code,
                     error_context=ast_error,
                     run_context="a Python AST compiler",
                 )
@@ -171,9 +170,8 @@ def main():
                 logger.error(
                     f"Native `compile` error - Attempt number {attempt + 1} - \n{compiler_error}"
                 )
-                common_agent.tagged_chat_history += get_regen_plist(
+                common_agent.tagged_chat_history += get_code_regen_plist(
                     task_description=f"Generate code to perform {strat}",
-                    prev_code=code,
                     error_context=ast_error,
                     run_context="a Python native compiler",
                 )
@@ -186,9 +184,8 @@ def main():
                 logger.error(
                     f"In container error - Attempt number {attempt + 1} - \n{execution_output}"
                 )
-                common_agent.tagged_chat_history += get_regen_plist(
+                common_agent.tagged_chat_history += get_code_regen_plist(
                     task_description=f"Generate code to perform {strat}",
-                    prev_code=code,
                     error_context=execution_output,
                     run_context="a Docker container",
                 )
@@ -203,9 +200,8 @@ def main():
                 logger.error(
                     f"No deleted files are detected- Attempt number {attempt + 1} - \n{execution_output}"
                 )
-                common_agent.tagged_chat_history += get_regen_plist(
+                common_agent.tagged_chat_history += get_code_regen_plist(
                     task_description=f"Generate code to perform {strat}",
-                    prev_code=code,
                     error_context="No files are being freed or deleted",
                     run_context="a Docker container",
                 )

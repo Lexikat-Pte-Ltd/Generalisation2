@@ -1,12 +1,13 @@
-from typing import List, Dict, Tuple
+from typing import Callable, List, Dict, Tuple, TypeAlias
+
 
 # Example :
 # message = {"role": "system": "content": "..."}
-Message = Dict[str, str]
+Message: TypeAlias = Dict[str, str]
 
 # Example :
 # tagged_message = ({"role": "system": "content": "..."}, "system")
-TaggedMessage = Tuple[Message, str]
+TaggedMessage: TypeAlias = Tuple[Message, str]
 
 # Example :
 # plist = [
@@ -16,7 +17,7 @@ TaggedMessage = Tuple[Message, str]
 #   {"role": "user": "content": "..."},
 #   {"role": "assistant": "content": "..."},
 # ]
-PList = List[Message]
+PList: TypeAlias = List[Message]
 
 # Example :
 # tagged_plist = [
@@ -26,6 +27,6 @@ PList = List[Message]
 #   ({"role": "user": "content": "..."}, "code_strategy_gen"),
 #   ({"role": "assistant": "content": "..."}, "code_strategy_reply"),
 # ]
-TaggedPList = List[TaggedMessage]
+TaggedPList: TypeAlias = List[TaggedMessage]
 
-
+GennerType: TypeAlias = Callable[[List[Message]], str]
