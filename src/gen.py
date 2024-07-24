@@ -14,7 +14,8 @@ from src.types import Message, TaggedMessage
 
 GennerType: TypeAlias = Callable[[List[Message]], str]
 
-DEEPSEEK_TEMPLATE = """{%- if not add_generation_prompt is defined -%}
+DEEPSEEK_TEMPLATE = """
+{%- if not add_generation_prompt is defined -%}
 {%- set add_generation_prompt = false -%}
 {%- endif -%}
 {%- set ns = namespace(found=false) -%}
@@ -39,7 +40,8 @@ DEEPSEEK_TEMPLATE = """{%- if not add_generation_prompt is defined -%}
 {%- endfor %}
 {% if add_generation_prompt %}
 {{'### Response:\\n'}}
-{%- endif -%}"""
+{%- endif -%}
+""".strip()
 
 
 def _create_deepseek_genner(
