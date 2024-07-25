@@ -1,7 +1,10 @@
 from __future__ import annotations
+from typing import List
 
 from pydantic import BaseModel
 from textwrap import dedent
+
+from src.types import Message, TaggedMessage
 
 
 class EnvironmentInfo(BaseModel):
@@ -49,3 +52,14 @@ class EnvironmentInfo(BaseModel):
             return False
         else:
             return True
+
+
+class EnvAgentRunData(BaseModel):
+    tagged_chat_history: List[TaggedMessage]
+    special_env_info_getter_codes: List[str]
+
+
+class CommonAgentRunData(BaseModel):
+    tagged_chat_history: List[TaggedMessage]
+    strat: str
+    space_freed: int
