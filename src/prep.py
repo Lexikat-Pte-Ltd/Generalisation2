@@ -54,8 +54,14 @@ def get_system_plist(
     ]
 
 
-BASIC_ENV_INFO_INCLUSION_TEMPLATE = """
+PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE = """
 Here's also an additional environment information that you can use to aid you in this process, encoded in \"EnvInfo\" XML tag, those are
+<BasicEnvInfos>
+{basic_env_infos}
+</BasicEnvInfos>
+""".strip()
+
+SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE = """
 <BasicEnvInfo>
 {basic_env_info}
 </BasicEnvInfo>
@@ -65,8 +71,9 @@ BASIC_ENV_PLIST_TAG = "get_basic_env_plist"
 
 
 def get_basic_env_plist(
-    basic_env_info: str,
+    bs_eih: List[EnvironmentInfo],
     tag=BASIC_ENV_PLIST_TAG,
+    max_count=5,
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, CommonAgent, ContextProvider)
 
@@ -83,18 +90,32 @@ def get_basic_env_plist(
     ```
 
     Args:
-        basic_env_info (str): Initial or basic environment info.
+        bs_eih (str): Initial or basic environment info history.
         tag (str, optional): Tag to identify the only message in plist.
 
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    inclusion_prompt = BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-        basic_env_info=basic_env_info
-    )
+    if len(bs_eih) > 1:
+        inner_env_infos = []
+
+        for env_info in bs_eih:
+            inner_env_infos.append(
+                SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+                    basic_env_info=str(env_info)
+                )
+            )
+
+        outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+            basic_env_infos="".join(inner_env_infos[-max_count:])
+        )
+    else:
+        outer_env_infos = SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+            basic_env_info=bs_eih[0]
+        )
 
     return [
-        ({"role": "user", "content": inclusion_prompt}, tag),
+        ({"role": "user", "content": outer_env_infos}, tag),
     ]
 
 
@@ -116,8 +137,9 @@ SPECIAL_ENV_PLIST_TAG = "get_special_env_plist"
 
 # Used by basic agent
 def get_special_env_plist(
-    special_env_infos: List[str],
+    sp_eih: List[List[str]],
     tag=SPECIAL_ENV_PLIST_TAG,
+    max_count=10,
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, CommonAgent, ContextProvider)
 
@@ -148,27 +170,33 @@ def get_special_env_plist(
     ```
 
     Args:
-        special_env_info (str): Special env info from docker execution.
+        sp_eih (List[List[str]]): Special env info from docker execution.
         tag (str, optional): Tag to identify the only message in plist.
 
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    wrapped_env_infos = []
+    if len(sp_eih) > 1:
+        inner_env_infos = []
 
-    for env_info in special_env_infos:
-        wrapped_env_infos.append(
-            SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
-                special_env_info=env_info
-            )
+        for env_infos in sp_eih:
+            for env_info in env_infos:
+                inner_env_infos.append(
+                    SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+                        special_env_info=env_info
+                    )
+                )
+
+        outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+            basic_env_infos="".join(inner_env_infos[-max_count:])
+        )
+    else:
+        outer_env_infos = SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+            basic_env_info=sp_eih[0]
         )
 
-    inclusion_prompt = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
-        special_env_infos="".join(wrapped_env_infos)
-    )
-
     return [
-        ({"role": "user", "content": inclusion_prompt}, tag),
+        ({"role": "user", "content": outer_env_infos}, tag),
     ]
 
 
