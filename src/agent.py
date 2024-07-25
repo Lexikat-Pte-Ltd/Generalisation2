@@ -19,6 +19,7 @@ from src.prep import (
     SYSTEM_PLIST_TAG,
     get_basic_env_plist,
     get_code_regen_plist,
+    get_special_egc_req_plist,
     get_strat_req_plist,
     get_system_plist,
     get_special_env_plist,
@@ -57,14 +58,17 @@ class EnvAgent:
         self.sp_env_info_getter_codes: List[str] = []
         self.tagged_chat_history: List[TaggedMessage] = []
 
-        self.bs_env_info_history = [initial_basic_env_info]
-        self.sp_env_info_history: List[str] = []
+        self.bs_env_info_history: List[EnvironmentInfo] = []
+        self.bs_env_info_history.append(initial_basic_env_info)
+        self.sp_env_info_history: List[List[str]] = []
 
         self.in_con_path = in_con_path
 
-        self.tagged_chat_history += get_system_plist(in_con_path=str(in_con_path))
-        self.tagged_chat_history += get_basic_env_plist(
-            basic_env_info=str(initial_basic_env_info)
+        self.tagged_chat_history.extend(  #
+            get_system_plist(in_con_path=str(in_con_path))
+        )
+        self.tagged_chat_history.extend(
+            get_basic_env_plist(bs_eih=self.bs_env_info_history)
         )
 
     @property
@@ -115,8 +119,55 @@ class EnvAgent:
 
         logger.debug(f"\n{self.bs_env_info_history}")
 
-    def gen_sp_egc(
+    def gen_multi_sp_egc(
         self,
+        count: int,
+        in_con_path: str | Path,
+        genner: Callable,
+        docker_client: DockerClient,
+        testing_container_id: str,
+        max_attempts: int = 5,
+    ):
+        """Generate multiple SP EGC (Special Environment Info Getter Code)
+
+        Args:
+            count (int)
+            in_con_path (str | Path)
+            genner (Callable)
+            docker_client (DockerClient)
+            testing_container_id (str)
+            max_attempts (int, optional): Defaults to 5.
+
+        Raises:
+            Exception: _description_
+        """
+        for i in range(count):
+            self.tagged_chat_history.extend(get_special_egc_req_plist(in_con_path))
+
+            env_getter_code, succeed = self.gen_single_sp_egc(
+                count=i,
+                genner=genner,
+                docker_client=docker_client,
+                testing_container_id=testing_container_id,
+                max_attempts=max_attempts,
+            )
+
+            # If special environment getters generation process failed
+            if not succeed:
+                logger.error(
+                    f"EA - {i}-th SP EGC - Failed generating env getter code after {max_attempts}"
+                )
+                raise Exception("EA - Somehow `gen_sp_egc` failed.")
+
+            # Update (append) env_agent's state
+            logger.info(
+                f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
+            )
+            self.append_new_code(env_getter_code)
+
+    def gen_single_sp_egc(
+        self,
+        count: int,
         genner: Callable,
         docker_client: DockerClient,
         testing_container_id: str,
@@ -138,11 +189,12 @@ class EnvAgent:
                 Anything that leads to a failed gen.
             Flow :
                 - ... > Failed Gen > Regen Request > Failed / Success Gen
-            Start State :
+            End State :
                 - Failed / success gen.
         ```
 
         Args:
+            counter (int): Current count for debugging purposes.
             genner (GennerFunction): Genner function.
             docker_client (DockerClient): Docker Client.
             testing_container_id (str): Container ID to evaluate generated code.
@@ -151,13 +203,13 @@ class EnvAgent:
         Returns:
             Tuple[str, bool]: Generated code and success status.
         """
-        logger.debug(
-            f"EnvAgent's tagged chat history - \n {format_tch(self.tagged_chat_history)}"
-        )
-
         for attempt in range(max_attempts):
-            logger.info(
-                f"EnvAgent's in loop chat history - \n {format_tch(self.tagged_chat_history)}"
+            logger.debug(
+                (
+                    f"EA - {count}-th code - {attempt}-th attempt - ",
+                    f"EnvAgent's in loop tagged chat history - \n {
+                        format_tch(self.tagged_chat_history)}",
+                )
             )
 
             code, raw_response = gen_code(
@@ -167,30 +219,50 @@ class EnvAgent:
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
                 logger.error(
-                    f"AST error - Attempt number {attempt + 1} - \n{ast_error}"
+                    f"EA - {count}-th code - {attempt}-th attempt - "
+                    f"AST error \n{ast_error}"
                 )
-                self.tagged_chat_history += [
-                    ({"role": "assistant", "content": raw_response}, "gen_sp_egc(ast_fail)")
-                ]
-                self.tagged_chat_history += get_code_regen_plist(
-                    task_description="Generate and test code for getting non-basic environment info",
-                    error_context=ast_error,
-                    run_context="a Python AST compiler",
+                logger.debug(f"EA - Code is \n{code}")
+
+                self.tagged_chat_history.extend(
+                    [
+                        (
+                            {"role": "assistant", "content": raw_response},
+                            "gen_sp_egc(ast_fail)",
+                        )
+                    ]
+                )
+                self.tagged_chat_history.extend(
+                    get_code_regen_plist(
+                        task_description="Generate and test code for getting non-basic environment info",
+                        error_context=ast_error,
+                        run_context="a Python AST compiler",
+                    )
                 )
                 continue
 
             compile_valid, compiler_error = is_valid_code_compiler(code)
             if not compile_valid:
                 logger.error(
-                    f"Native `compile` error - Attempt number {attempt + 1} - \n{compiler_error}"
+                    f"EA - {count}-th code - {attempt}-th attempt - "
+                    f"Native `compile` error \n{ast_error}"
                 )
-                self.tagged_chat_history += [
-                    ({"role": "assistant", "content": raw_response}, "gen_sp_egc(compile_fail)")
-                ]
-                self.tagged_chat_history += get_code_regen_plist(
-                    task_description="Generate and test code for getting non-basic environment info",
-                    error_context=ast_error,
-                    run_context="a Python native compiler",
+                logger.debug(f"EA - Code is \n{code}")
+
+                self.tagged_chat_history.extend(
+                    [
+                        (
+                            {"role": "assistant", "content": raw_response},
+                            "gen_sp_egc(compile_fail)",
+                        )
+                    ]
+                )
+                self.tagged_chat_history.extend(
+                    get_code_regen_plist(
+                        task_description="Generate and test code for getting non-basic environment info",
+                        error_context=ast_error,
+                        run_context="a Python native compiler",
+                    )
                 )
                 continue
 
@@ -199,21 +271,39 @@ class EnvAgent:
             )
             if exit_code != 0:
                 logger.error(
-                    f"In container error - Attempt number {attempt + 1} - \n{execution_output}"
+                    f"EA - {count}-th code - {attempt}-th attempt - "
+                    f"In container error \n{ast_error}"
                 )
-                self.tagged_chat_history += [
-                    ({"role": "assistant", "content": raw_response}, "gen_sp_egc(container_fail)")
-                ]
-                self.tagged_chat_history += get_code_regen_plist(
-                    task_description="Generate and test code for getting non-basic environment info",
-                    error_context=execution_output,
-                    run_context="a Docker container",
+                logger.debug(f"EA - Code is \n{code}")
+
+                self.tagged_chat_history.extend(
+                    [
+                        (
+                            {"role": "assistant", "content": raw_response},
+                            "gen_sp_egc(container_fail)",
+                        )
+                    ]
+                )
+                self.tagged_chat_history.extend(
+                    get_code_regen_plist(
+                        task_description="Generate and test code for getting non-basic environment info",
+                        error_context=execution_output,
+                        run_context="a Docker container",
+                    )
                 )
                 continue
 
-            self.tagged_chat_history += [
-                ({"role": "assistant", "content": raw_response}, "gen_sp_egc(success)")
-            ]
+            self.tagged_chat_history.extend(
+                [
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "gen_sp_egc(success)",
+                    )
+                ]
+            )
+
+            logger.info(f"EA - {count}-th code - Codegen loop succeed")
+            logger.debug(f"EA - {count}-th code - Code is \n{code}")
 
             return code, True
 
@@ -270,8 +360,8 @@ class CommonAgent:
 
     def __init__(
         self,
-        basic_env_info_history: List[EnvironmentInfo],
-        sp_env_info_history: List[str],
+        bs_env_info_history: List[EnvironmentInfo],
+        sp_env_info_history: List[List[str]],
         in_con_path: str | Path,
     ):
         """Initialize a common agent to be used for strategies generation and space clearing code generation.
@@ -285,21 +375,23 @@ class CommonAgent:
         """
 
         self.tagged_chat_history: List[TaggedMessage] = []
-        self.old_tagged_chat_histories: List[List[TaggedMessage]] = []
-        self.cur_strats: List[str] = []
+        self.tagged_chat_history_seq: List[List[TaggedMessage]] = []
+        self.strats: List[str] = []
 
         self.in_con_path = in_con_path
 
         # Add system prompt
         self.tagged_chat_history.extend(
-            get_system_plist(str(in_con_path), str(basic_env_info_history))
+            get_system_plist(str(in_con_path), str(bs_env_info_history))
         )
         # Add special env inclusion prompt
         self.tagged_chat_history.extend(
-            get_special_env_plist(special_env_infos=sp_env_info_history)
+            get_special_env_plist(sp_eih=sp_env_info_history)
         )
         # Add strategy gen prompt
-        self.tagged_chat_history.extend(get_strat_req_plist(in_con_path=in_con_path))
+        self.tagged_chat_history.extend(  #
+            get_strat_req_plist(in_con_path=in_con_path)
+        )
 
     @property
     def chat_history(self) -> List[Message]:
@@ -342,7 +434,7 @@ class CommonAgent:
             processed_strats: Processed strat for debugging purposes.
         """
 
-        self.cur_strats = strats
+        self.strats = strats
 
         strats_ = []
 
@@ -364,13 +456,13 @@ class CommonAgent:
 
     def update_env_info_state(
         self,
-        fresh_basic_env_info: EnvironmentInfo,
-        fresh_special_env_infos: List[str],
+        fresh_bs_eih: List[EnvironmentInfo],
+        fresh_sp_eih: List[List[str]],
         basic_env_info_tag="get_basic_env_plist",
         special_env_info_tag="get_special_env_plist",
     ) -> int:
         # For saving and historical purposes
-        self.old_tagged_chat_histories.append(self.tagged_chat_history)
+        self.tagged_chat_history_seq.append(self.tagged_chat_history)
 
         changes = 0
 
@@ -378,17 +470,13 @@ class CommonAgent:
             tag = self.tagged_chat_history[i][1]
 
             if tag == basic_env_info_tag:
-                self.tagged_chat_history[i] = get_basic_env_plist(
-                    str(fresh_basic_env_info)
-                )[0]
+                self.tagged_chat_history[i] = get_basic_env_plist(fresh_bs_eih)[0]
 
                 changes += 1
 
                 continue
             elif tag == special_env_info_tag:
-                self.tagged_chat_history[i] = get_special_env_plist(
-                    fresh_special_env_infos
-                )[0]
+                self.tagged_chat_history[i] = get_special_env_plist(fresh_sp_eih)[0]
 
                 changes += 1
 
@@ -397,14 +485,14 @@ class CommonAgent:
         return changes
 
     def save_tagged_chat_history_to_json(self, identifier: str, folder: Path | str):
-        # Save the old one
-        for i, old_tagged_chat_history in enumerate(self.old_tagged_chat_histories):
+        # Save the sequential one
+        for i, old_tagged_chat_history in enumerate(self.tagged_chat_history_seq):
             with open(
                 Path(folder) / f"{identifier}_chat_history_{i}.json", "w"
             ) as json_file:
                 json.dump(old_tagged_chat_history, json_file, indent=4)
 
-        # Save the current one
+        # Save the latest one
         with open(
             Path(folder) / f"{identifier}_chat_history_latest.json", "w"
         ) as json_file:
