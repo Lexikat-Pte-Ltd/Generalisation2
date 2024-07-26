@@ -1,7 +1,9 @@
 import copy
+from datetime import datetime
+from fileinput import filename
 import json
 from pathlib import Path
-from typing import Callable, List, Tuple
+from typing import Callable, List, OrderedDict, Tuple
 
 from loguru import logger
 from docker import DockerClient
@@ -127,7 +129,7 @@ class EnvAgent:
         docker_client: DockerClient,
         testing_container_id: str,
         max_attempts: int = 5,
-    ):
+    ) -> Tuple[List[TaggedMessage], List[str]]:
         """Generate multiple SP EGC (Special Environment Info Getter Code)
 
         Args:
@@ -138,13 +140,20 @@ class EnvAgent:
             testing_container_id (str)
             max_attempts (int, optional): Defaults to 5.
 
+        Returns:
+            List[TaggedMessage]: TCH to append to EIH's TCH
+            List[str]: New SP EGC to append to EIH's SP EGC.
+
         Raises:
             Exception: _description_
         """
-        for i in range(count):
-            self.tagged_chat_history.extend(get_special_egc_req_plist(in_con_path))
+        cache_tch: List[TaggedMessage] = []
+        sp_egc: List[str] = []
 
-            env_getter_code, succeed = self.gen_single_sp_egc(
+        for i in range(count):
+            cache_tch.extend(get_special_egc_req_plist(in_con_path))
+
+            env_getter_code, succeed, new_tch = self.gen_single_sp_egc(
                 count=i,
                 genner=genner,
                 docker_client=docker_client,
@@ -163,7 +172,11 @@ class EnvAgent:
             logger.info(
                 f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
             )
-            self.append_new_code(env_getter_code)
+
+            cache_tch.extend(new_tch)
+            sp_egc.append(env_getter_code)
+
+        return cache_tch, sp_egc
 
     def gen_single_sp_egc(
         self,
@@ -172,7 +185,7 @@ class EnvAgent:
         docker_client: DockerClient,
         testing_container_id: str,
         max_attempts: int = 5,
-    ) -> Tuple[str, bool]:
+    ) -> Tuple[str, bool, List[TaggedMessage]]:
         """Generate and test SP EGC (Special Env Info Getter Code).
 
         ```
@@ -203,6 +216,8 @@ class EnvAgent:
         Returns:
             Tuple[str, bool]: Generated code and success status.
         """
+        func_tch: List[TaggedMessage] = []
+
         for attempt in range(max_attempts):
             logger.debug(
                 (
@@ -213,7 +228,8 @@ class EnvAgent:
             )
 
             code, raw_response = gen_code(
-                genner, to_normal_plist(self.tagged_chat_history)
+                genner,
+                to_normal_plist(self.tagged_chat_history) + to_normal_plist(func_tch),
             )
 
             ast_valid, ast_error = is_valid_code_ast(code)
@@ -224,15 +240,13 @@ class EnvAgent:
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
-                self.tagged_chat_history.extend(
-                    [
-                        (
-                            {"role": "assistant", "content": raw_response},
-                            "gen_sp_egc(ast_fail)",
-                        )
-                    ]
+                func_tch.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "gen_sp_egc(ast_fail)",
+                    )
                 )
-                self.tagged_chat_history.extend(
+                func_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
                         error_context=ast_error,
@@ -249,15 +263,13 @@ class EnvAgent:
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
-                self.tagged_chat_history.extend(
-                    [
-                        (
-                            {"role": "assistant", "content": raw_response},
-                            "gen_sp_egc(compile_fail)",
-                        )
-                    ]
+                func_tch.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "gen_sp_egc(compile_fail)",
+                    )
                 )
-                self.tagged_chat_history.extend(
+                func_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
                         error_context=ast_error,
@@ -276,15 +288,13 @@ class EnvAgent:
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
-                self.tagged_chat_history.extend(
-                    [
-                        (
-                            {"role": "assistant", "content": raw_response},
-                            "gen_sp_egc(container_fail)",
-                        )
-                    ]
+                func_tch.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "gen_sp_egc(container_fail)",
+                    )
                 )
-                self.tagged_chat_history.extend(
+                func_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
                         error_context=execution_output,
@@ -293,21 +303,20 @@ class EnvAgent:
                 )
                 continue
 
-            self.tagged_chat_history.extend(
-                [
-                    (
-                        {"role": "assistant", "content": raw_response},
-                        "gen_sp_egc(success)",
-                    )
-                ]
+            func_tch.append(
+                (
+                    {"role": "assistant", "content": raw_response},
+                    "gen_sp_egc(success)",
+                )
             )
 
             logger.info(f"EA - {count}-th code - Codegen loop succeed")
+            logger.info(f"EA - {count}-th code - Cache TCH is {len(func_tch)}")
             logger.debug(f"EA - {count}-th code - Code is \n{code}")
 
-            return code, True
+            return code, True, func_tch
 
-        return "", False
+        return "", False, func_tch
 
     def execute_sp_env_infos(
         self, docker_client: DockerClient, container_id: str
@@ -341,11 +350,22 @@ class EnvAgent:
         """
         self.sp_env_info_getter_codes.append(code)
 
-    def save_tagged_chat_history_to_json(self, identifier: str, folder: Path | str):
-        with open(
-            Path(folder) / f"{identifier}_env_chat_history_latest.json", "w"
-        ) as json_file:
-            json.dump(self.tagged_chat_history, json_file, indent=4)
+    def save_data(self, folder: Path | str):
+        tch_len = len(self.tagged_chat_history)
+        formatted_datetime = datetime.now().strftime("%d%m%y_%H%M")
+        file_name = f"{formatted_datetime}_run_data_at_{tch_len}"
+
+        # Save the sequential one
+        save_data = OrderedDict(
+            [
+                ("tag", "[history, env_agent]"),
+                ("sp_egc_s", self.sp_env_info_getter_codes),
+                ("tagged_chat_history", self.tagged_chat_history),
+            ]
+        )
+
+        with open(Path(folder) / file_name, "w") as json_file:
+            json.dump(save_data, json_file, ident=4)
 
 
 class CommonAgent:
@@ -375,7 +395,6 @@ class CommonAgent:
         """
 
         self.tagged_chat_history: List[TaggedMessage] = []
-        self.tagged_chat_history_seq: List[List[TaggedMessage]] = []
         self.strats: List[str] = []
 
         self.in_con_path = in_con_path
@@ -422,38 +441,6 @@ class CommonAgent:
 
         return gen_list(genner, self.tagged_chat_history)
 
-    def update_strat_state(self, strats: List[str], tag="strats_reply") -> str:
-        """Given a newly generated strategies, will process the strategies so that it is appendable
-        to the tagged chat history in the object.
-
-        Args:
-            strats (List[str]): Generated strategies.
-            tag (str, optional): Tag of the processed strategy in tagged chat history. Defaults to "strats".
-
-        Returns:
-            processed_strats: Processed strat for debugging purposes.
-        """
-
-        self.strats = strats
-
-        strats_ = []
-
-        for strat in strats:
-            strats_.append("<Strat>")
-            strats_.append(f"{strat}")
-            strats_.append("</Strat>")
-
-        processed_strats = "\n".join(strats_)
-
-        self.tagged_chat_history.append(
-            (
-                {"role": "assistant", "content": processed_strats},  #
-                tag,  #
-            )
-        )
-
-        return processed_strats
-
     def update_env_info_state(
         self,
         fresh_bs_eih: List[EnvironmentInfo],
@@ -461,9 +448,6 @@ class CommonAgent:
         basic_env_info_tag="get_basic_env_plist",
         special_env_info_tag="get_special_env_plist",
     ) -> int:
-        # For saving and historical purposes
-        self.tagged_chat_history_seq.append(self.tagged_chat_history)
-
         changes = 0
 
         for i in range(len(self.tagged_chat_history)):
@@ -484,16 +468,22 @@ class CommonAgent:
 
         return changes
 
-    def save_tagged_chat_history_to_json(self, identifier: str, folder: Path | str):
-        # Save the sequential one
-        for i, old_tagged_chat_history in enumerate(self.tagged_chat_history_seq):
-            with open(
-                Path(folder) / f"{identifier}_chat_history_{i}.json", "w"
-            ) as json_file:
-                json.dump(old_tagged_chat_history, json_file, indent=4)
+    def save_data(self, space_freed: float, strat: str, folder: Path | str):
+        strat_identifier = [word[0].lower() for word in strat.split(" ")][:10]
+        tch_len = len(self.tagged_chat_history)
+        formatted_datetime = datetime.now().strftime("%d%m%y_%H%M")
 
-        # Save the latest one
-        with open(
-            Path(folder) / f"{identifier}_chat_history_latest.json", "w"
-        ) as json_file:
-            json.dump(self.tagged_chat_history, json_file, indent=4)
+        file_name = f"{formatted_datetime}_ca_run_data_at_{tch_len}_{strat_identifier}"
+
+        # Save the sequential one
+        save_data = OrderedDict(
+            [
+                ("tag", "[history, common_agent]"),
+                ("strat", strat),
+                ("space_freed", space_freed),
+                ("tagged_chat_history", self.tagged_chat_history),
+            ]
+        )
+
+        with open(Path(folder) / file_name, "w") as json_file:
+            json.dump(save_data, json_file, ident=4)

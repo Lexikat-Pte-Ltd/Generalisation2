@@ -4,7 +4,7 @@ from typing import List
 from pydantic import BaseModel
 from textwrap import dedent
 
-from src.types import Message, TaggedMessage
+from src.types import TaggedMessage
 
 
 class EnvironmentInfo(BaseModel):
@@ -37,7 +37,7 @@ class EnvironmentInfo(BaseModel):
         - total_storage: {self.total_storage}
         - available_storage: {self.available_storage} """)
 
-    def files_are_deleted(self, fresh_env_info: EnvironmentInfo):
+    def total_files_deleted(self, fresh_env_info: EnvironmentInfo):
         """Assume self as the oldest object.
 
         Args:
@@ -46,20 +46,14 @@ class EnvironmentInfo(BaseModel):
         Returns:
             bool: If files are indeed managed to be deleted
         """
-        available_storage = self.available_storage - fresh_env_info.available_storage
+        old_available_storage = self.available_storage
+        new_available_storage = fresh_env_info.available_storage
 
-        if available_storage >= 0:
-            return False
+        storage_diff = old_available_storage - new_available_storage
+
+        if storage_diff > 0:
+            return storage_diff, True
         else:
-            return True
+            return storage_diff, False
 
 
-class EnvAgentRunData(BaseModel):
-    tagged_chat_history: List[TaggedMessage]
-    special_env_info_getter_codes: List[str]
-
-
-class CommonAgentRunData(BaseModel):
-    tagged_chat_history: List[TaggedMessage]
-    strat: str
-    space_freed: int

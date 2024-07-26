@@ -15,13 +15,11 @@ from src.code import is_valid_code_ast, is_valid_code_compiler
 from src.container import (
     run_code_in_con,
     safe_detect_env,
-    safe_folderlist_bfs,
 )
 from src.data import EnvironmentInfo
 from src.helper import format_tch
 from src.prep import (
     get_code_regen_plist,
-    get_special_egc_req_plist,
     get_strat_code_gen_plist,
 )
 from src.gen import create_genner, gen_code
@@ -42,11 +40,11 @@ if BACKEND == "oai":
 
 oai_client = OpenAI(api_key=OAI_API_KEY)
 docker_client = docker.from_env()
-
 genner = create_genner(BACKEND, oai_client=oai_client)
 
 
 def main():
+    save_folder = Path() / "data"
     # In container path for work path purposes
     in_con_path = Path("/")
 
@@ -58,13 +56,13 @@ def main():
 
     # Initiate env agent
     logger.info("EA - Initializing environment agent.")
-    env_agent = EnvAgent(
+    ea = EnvAgent(
         initial_basic_env_info=initial_basic_env_info, in_con_path=in_con_path
     )
 
     # Generate 2 special env getter code
     logger.info(f"EA - Generating {EA_MAX_SP_EGC} special environment getter code.")
-    env_agent.gen_multi_sp_egc(
+    new_tch, new_sp_egc_s = ea.gen_multi_sp_egc(
         count=EA_MAX_SP_EGC,
         in_con_path=in_con_path,
         genner=genner,
@@ -72,21 +70,23 @@ def main():
         testing_container_id=CONTAINER_ID,
         max_attempts=EA_MAX_ATTEMPTS,
     )
+    ea.tagged_chat_history.extend(new_tch)
+    ea.sp_env_info_getter_codes.extend(new_sp_egc_s)
 
     # Execute all env getting codes that has obtained
     logger.info(f"EA - Executing all SP EGC code on container {CONTAINER_ID} ...")
-    initial_special_env_infos = env_agent.execute_sp_env_infos(
+    initial_special_env_infos = ea.execute_sp_env_infos(
         docker_client=docker_client, container_id=CONTAINER_ID
     )
 
     # Update env_agent's state
     logger.info("EA - Updating environment agent's SP EIH state...")
-    env_agent.sp_env_info_getter_codes.extend(initial_special_env_infos)
+    ea.sp_env_info_getter_codes.extend(initial_special_env_infos)
 
     # Intiiate common agent
     common_agent = CommonAgent(
-        bs_env_info_history=env_agent.bs_env_info_history,
-        sp_env_info_history=env_agent.sp_env_info_history,
+        bs_env_info_history=ea.bs_env_info_history,
+        sp_env_info_history=ea.sp_env_info_history,
         in_con_path=in_con_path,
     )
 
@@ -114,19 +114,28 @@ def main():
         loop_bs_env_info = safe_detect_env(docker_client, CONTAINER_ID)
 
         # Update env agent
-        env_agent.bs_env_info_history.append(loop_bs_env_info)
-        env_agent.sp_env_info_history.append(
-            env_agent.execute_sp_env_infos(
+        ea.bs_env_info_history.append(loop_bs_env_info)
+        ea.sp_env_info_history.append(
+            ea.execute_sp_env_infos(
                 docker_client=docker_client, container_id=CONTAINER_ID
             )
         )
 
         # Update the env info state of the common agent with the 2 fresh env infos
         changes = cur_ca.update_env_info_state(
-            env_agent.bs_env_info_history, env_agent.sp_env_info_history
+            ea.bs_env_info_history, ea.sp_env_info_history
         )
         logger.info(
             f"CA - {i}-th strat - Number of updates on common agent env info's state {changes}"
+        )
+        # Save data before proceeding
+        cur_ca.save_data(
+            space_freed=-1,  # No space freed but can be useful maybe
+            strat=strat,
+            folder=save_folder,
+        )
+        logger.info(
+            f"CA - {i}-th strat - Saved data @ {len(cur_ca.tagged_chat_history)} on {save_folder}."
         )
 
         # Prepare the common agent chat history with prep prompts
@@ -135,7 +144,8 @@ def main():
         )
 
         # Gen some codes
-        for attempt in range(CA_MAX_ATTEMPTS):
+        attempt = 0
+        while attempt < CA_MAX_ATTEMPTS:
             logger.debug(
                 (
                     f"CA - {i}-th code - {attempt}-th attempt - ",
@@ -157,13 +167,11 @@ def main():
                 )
                 logger.debug(f"CA - Code is \n{code}")
 
-                cur_ca.tagged_chat_history.extend(
-                    [
-                        (
-                            {"role": "assistant", "content": raw_response},
-                            "strat_codegen(ast_fail)",
-                        )
-                    ]
+                cur_ca.tagged_chat_history.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "strat_codegen(ast_fail)",
+                    )
                 )
                 cur_ca.tagged_chat_history.extend(
                     get_code_regen_plist(
@@ -172,6 +180,8 @@ def main():
                         run_context="a Python AST compiler",
                     )
                 )
+
+                attempt += 1
                 continue
 
             compile_valid, compiler_error = is_valid_code_compiler(code)
@@ -183,13 +193,11 @@ def main():
                 )
                 logger.debug(f"CA - Code is \n{code}")
 
-                cur_ca.tagged_chat_history.extend(
-                    [
-                        (
-                            {"role": "assistant", "content": raw_response},
-                            "strat_codegen(compile_fail)",
-                        )
-                    ]
+                cur_ca.tagged_chat_history.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "strat_codegen(compile_fail)",
+                    )
                 )
                 cur_ca.tagged_chat_history.extend(
                     get_code_regen_plist(
@@ -198,6 +206,8 @@ def main():
                         run_context="a Python native compiler",
                     )
                 )
+
+                attempt += 1
                 continue
 
             exit_code, execution_output = run_code_in_con(
@@ -210,13 +220,11 @@ def main():
                 )
                 logger.debug(f"CA - Code is \n{code}")
 
-                cur_ca.tagged_chat_history.extend(
-                    [
-                        (
-                            {"role": "assistant", "content": raw_response},
-                            "strat_codegen(container_fail)",
-                        )
-                    ]
+                cur_ca.tagged_chat_history.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "strat_codegen(container_fail)",
+                    )
                 )
                 cur_ca.tagged_chat_history.extend(
                     get_code_regen_plist(
@@ -225,18 +233,28 @@ def main():
                         run_context="a Docker container",
                     )
                 )
+
+                attempt += 1
                 continue
 
             fresh_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
-            files_are_deleted = loop_bs_env_info.files_are_deleted(fresh_basic_env_info)
+            storage_changes, files_deleted = loop_bs_env_info.total_files_deleted(
+                fresh_basic_env_info
+            )
 
-            if not files_are_deleted:
+            if not files_deleted:
                 logger.error(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"No spaces are freed \n{execution_output}"
                 )
                 logger.debug(f"CA - Code is \n{code}")
 
+                cur_ca.tagged_chat_history.append(
+                    (
+                        {"role": "assistant", "content": raw_response},
+                        "strat_codegen(deletion_fail)",
+                    )
+                )
                 cur_ca.tagged_chat_history.extend(
                     get_code_regen_plist(
                         task_description=f"Generate code to perform {strat}",
@@ -244,34 +262,38 @@ def main():
                         run_context="a Docker container",
                     )
                 )
+
+                attempt += 1
                 continue
 
-            logger.info(f"CA - {i}-th strat - Codegen loop succeed")
-            logger.debug(f"CA - {i}-th strat - Code is \n{code}")
-
-            cur_ca.tagged_chat_history.extend(
-                [
-                    (
-                        {"role": "assistant", "content": raw_response},
-                        "strat_codegen(container_fail)",
-                    )
-                ]
-            )
-            # Files are deleted, lets save it
-            current_datetime = datetime.now()
-            formatted_datetime = current_datetime.strftime("%d%m%y_%H%M")
-
-            cur_ca.save_tagged_chat_history_to_json(
-                identifier=formatted_datetime, folder="data/learned_skills/"
-            )
-            env_agent.save_tagged_chat_history_to_json(
-                identifier=formatted_datetime, folder="data/learned_skills/"
+        if attempt >= CA_MAX_ATTEMPTS:
+            logger.info(f"CA - {i}-th strat - Codegen loop ended up in failure")
+        else:
+            logger.info(f"CA - {i}-th strat - Codegen loop ended up in success")
+            cur_ca.tagged_chat_history.append(
+                (
+                    {"role": "assistant", "content": raw_response},
+                    "strat_codegen(success)",
+                )
             )
 
-            logger.info(
-                "Code loop is done for the strat {strat} on {attempt}-th iteration."
-            )
-            logger.info("Continuing to next strat if exists...")
+        logger.debug(f"CA - {i}-th strat - Code is \n{code}")
+
+        # Lets save it
+        current_datetime = datetime.now()
+        formatted_datetime = current_datetime.strftime("%d%m%y_%H%M")
+
+        cur_ca.save_data(
+            space_freed=storage_changes,  # No space freed but can be useful maybe
+            strat=strat,
+            folder=save_folder,
+        )
+        ea.save_data(folder=save_folder)
+
+        logger.info(
+            "Code loop is done for the strat {strat} on {attempt}-th iteration."
+        )
+        logger.info("Continuing to next strat if exists...")
 
 
 if __name__ == "__main__":
