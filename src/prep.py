@@ -22,7 +22,7 @@ SYSTEM_PLIST_TAG = "system_plist"
 
 
 def get_system_plist(
-    in_con_path: str,
+    in_con_path: str | Path,
     tag=SYSTEM_PLIST_TAG,
 ) -> List[TaggedMessage]:
     """(System, Env, Basic)
@@ -46,7 +46,7 @@ def get_system_plist(
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
     system_prompt = SYSTEM_TEMPLATE.format(
-        in_con_path=in_con_path,  #
+        in_con_path=str(in_con_path),  #
     )
 
     return [
@@ -138,12 +138,12 @@ SPECIAL_ENV_PLIST_TAG = "get_special_env_plist"
 # Used by basic agent
 def get_special_env_plist(
     sp_eih: List[List[str]],
-    tag=SPECIAL_ENV_PLIST_TAG,
-    max_count=10,
+    tag: str = SPECIAL_ENV_PLIST_TAG,
+    max_count: int = 10,
 ) -> List[TaggedMessage]:
     """(User, EnvAgent, CommonAgent, ContextProvider)
 
-    Get special env plist that precedes `special_env` generation.
+    Generate a special environment plist that precedes the generation of a special environment.
 
     ```
     On EnvAgent (After a special env is available):
@@ -169,32 +169,45 @@ def get_special_env_plist(
     ]
     ```
 
+
     Args:
-        sp_eih (List[List[str]]): Special env info from docker execution.
-        tag (str, optional): Tag to identify the only message in plist.
+        sp_eih (List[List[str]]): A list of special environment information history. Each sublist contains
+            information about special environment infos at a point of time.
+        tag (str, optional): The tag to identify the only message in the plist. Defaults to
+            SPECIAL_ENV_PLIST_TAG.
+        max_count (int, optional): The maximum number of special environment information sets to
+            include in the plist. Defaults to 10.
 
     Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+        List[TaggedMessage]: A list containing a single tagged message. The message is a dictionary
+            with a "role" of "user" and a "content" that is the formatted string of special
+            environment information. The tag for this message is provided as an argument to the
+            function.
     """
+    assert len(sp_eih) > 0, "sp_eih must not be empty"
+
     if len(sp_eih) > 1:
+        # If there is more than one point of time at the history, then format each time of the history
+        # each set and combine them into a single string.
         inner_env_infos = []
 
         for env_infos in sp_eih:
             for env_info in env_infos:
                 inner_env_infos.append(
-                    SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+                    SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
                         special_env_info=env_info
                     )
                 )
-
-        outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-            basic_env_infos="".join(inner_env_infos[-max_count:])
+        outer_env_infos = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
+            special_env_infos="".join(inner_env_infos[-max_count:])
         )
     else:
-        outer_env_infos = SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-            basic_env_info=sp_eih[0]
+        # If there is only a time at the history then format the single set of information.
+        outer_env_infos = SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
+            special_env_info=sp_eih[0]
         )
 
+    # Return a list containing a single tagged message.
     return [
         ({"role": "user", "content": outer_env_infos}, tag),
     ]
@@ -202,16 +215,21 @@ def get_special_env_plist(
 
 STRAT_REQ_TEMPLATE = """
 Given the previous context, generate a few specific potential strategies as an AI agent to achieve freeing up some disk space for the directory `{in_con_path}`. 
-Please generate the task in JSON list exactly formatted like {{"list": ["strategy1", "strategy2", ... "strategyN"]}}. 
+Here also a list of previous strat that youve used. You are encouraged to use new strategies not in the list.
+<PreviousStrats>
+{prev_strats}
+</PreviousStrats>
+Please generate the task in json list exactly formatted like {{"list": ["strategy1", "strategy2", ... "strategyN"]}}. 
 """.strip()
 STRAT_REQ_PLIST_TAG = "get_strat_req_plist"
 
 
 def get_strat_req_plist(
     in_con_path: str | Path,
+    prev_strats: List[str],
     tag=STRAT_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
-    """(User, CommonAgent, GenerationRequest, ListOutput)
+    """(User, CommonAgent, GenerationRequest, JsonListOutput)
 
     Get strat gen plist for strat generation.
 
@@ -234,8 +252,11 @@ def get_strat_req_plist(
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
+    formatted_prev_strats = "\n".join(f"- {strat}" for strat in prev_strats)
+
     strat_prompt = STRAT_REQ_TEMPLATE.format(
-        in_con_path=in_con_path  #
+        in_con_path=str(in_con_path),  #
+        prev_strats=formatted_prev_strats,
     )
 
     return [
@@ -248,11 +269,12 @@ Given the previous context, generate python code for obtaining special environme
 You are working in the directory of {in_con_path}.
 Be original, unique, and create other information that has yet existed in the previous environment info.
 Also use default python library and nothing else.
-Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}. 
+Please generate the code in json format exactly formatted like {{"code": "import ... "}}. 
 The code are expected to print out string to stdout containing environment information.
 If there is another code you have previously generated, be different and unique to the previous one.
 DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`for without installing another new library.
 """.strip()
+
 SPECIAL_EGC_REQ_PLIST_TAG = "get_special_egc_req_plist"
 
 
@@ -261,7 +283,7 @@ def get_special_egc_req_plist(
     in_con_path: str | Path,
     tag=SPECIAL_EGC_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
-    """(User, EnvAgent, GenerationRequest, CodeOutput)
+    """(User, EnvAgent, GenerationRequest, JsonCodeOutput)
 
     Get a plist for special EGC (Environment Getter Code) generation request.
 
@@ -304,7 +326,7 @@ STRAT_CODE_REQ_TAG = "get_strat_code_req_plist"
 
 
 # Used by basic agent
-def get_strat_code_gen_plist(
+def get_strat_code_req_plist(
     task_description: str,
     tag=STRAT_CODE_REQ_TAG,
 ) -> List[TaggedMessage]:

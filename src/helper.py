@@ -1,9 +1,33 @@
+import json
 import shutil
-from loguru import logger
+from pathlib import Path
 from typing import List, Sequence
-from src.data import EnvironmentInfo
-from src.types import TaggedMessage, Message
 
+from loguru import logger
+
+from src.data import EnvironmentInfo
+from src.types import Message, TaggedMessage
+
+
+def scan_json_files_for_strat(folder_path):
+    strat_list = []
+    folder = Path(folder_path)
+    
+    # Iterate through all JSON files in the specified folder
+    for file_path in folder.glob('*.json'):
+        try:
+            with file_path.open('r') as file:
+                data = json.load(file)
+                
+                # Check if 'strat' key exists directly in the JSON data
+                if 'strat' in data:
+                    strat_list.append(data['strat'])
+        except json.JSONDecodeError:
+            print(f"Error decoding JSON in file: {file_path.name}")
+        except IOError:
+            print(f"Error reading file: {file_path.name}")
+    
+    return strat_list
 
 def to_normal_plist(tagplist: Sequence[TaggedMessage]) -> List[Message]:
     result = [tupl[0] for tupl in tagplist]

@@ -12,7 +12,7 @@ from src.code import (
     is_valid_code_ast,
     is_valid_code_compiler,
 )
-from src.helper import format_tch, to_normal_plist
+from src.helper import format_ch, format_tch, to_normal_plist
 from src.data import EnvironmentInfo
 from src.prep import (
     BASIC_ENV_PLIST_TAG,
@@ -67,7 +67,7 @@ class EnvAgent:
         self.in_con_path = in_con_path
 
         self.tagged_chat_history.extend(  #
-            get_system_plist(in_con_path=str(in_con_path))
+            get_system_plist(in_con_path=in_con_path)
         )
         self.tagged_chat_history.extend(
             get_basic_env_plist(bs_eih=self.bs_env_info_history)
@@ -147,11 +147,11 @@ class EnvAgent:
         Raises:
             Exception: _description_
         """
-        cache_tch: List[TaggedMessage] = []
+        local_tch: List[TaggedMessage] = []
         sp_egc: List[str] = []
 
         for i in range(count):
-            cache_tch.extend(get_special_egc_req_plist(in_con_path))
+            local_tch.extend(get_special_egc_req_plist(in_con_path))
 
             env_getter_code, succeed, new_tch = self.gen_single_sp_egc(
                 count=i,
@@ -173,10 +173,10 @@ class EnvAgent:
                 f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
             )
 
-            cache_tch.extend(new_tch)
+            local_tch.extend(new_tch)
             sp_egc.append(env_getter_code)
 
-        return cache_tch, sp_egc
+        return local_tch, sp_egc
 
     def gen_single_sp_egc(
         self,
@@ -216,7 +216,8 @@ class EnvAgent:
         Returns:
             Tuple[str, bool]: Generated code and success status.
         """
-        func_tch: List[TaggedMessage] = []
+        local_tch: List[TaggedMessage] = []
+        local_tch.extend(get_special_egc_req_plist(self.in_con_path))
 
         for attempt in range(max_attempts):
             logger.debug(
@@ -227,9 +228,16 @@ class EnvAgent:
                 )
             )
 
+            logger.debug(
+                format_ch(
+                    to_normal_plist(self.tagged_chat_history)
+                    + to_normal_plist(local_tch),
+                )
+            )
+
             code, raw_response = gen_code(
                 genner,
-                to_normal_plist(self.tagged_chat_history) + to_normal_plist(func_tch),
+                to_normal_plist(self.tagged_chat_history) + to_normal_plist(local_tch),
             )
 
             ast_valid, ast_error = is_valid_code_ast(code)
@@ -240,13 +248,13 @@ class EnvAgent:
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
-                func_tch.append(
+                local_tch.append(
                     (
                         {"role": "assistant", "content": raw_response},
                         "gen_sp_egc(ast_fail)",
                     )
                 )
-                func_tch.extend(
+                local_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
                         error_context=ast_error,
@@ -263,13 +271,13 @@ class EnvAgent:
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
-                func_tch.append(
+                local_tch.append(
                     (
                         {"role": "assistant", "content": raw_response},
                         "gen_sp_egc(compile_fail)",
                     )
                 )
-                func_tch.extend(
+                local_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
                         error_context=ast_error,
@@ -288,13 +296,13 @@ class EnvAgent:
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
-                func_tch.append(
+                local_tch.append(
                     (
                         {"role": "assistant", "content": raw_response},
                         "gen_sp_egc(container_fail)",
                     )
                 )
-                func_tch.extend(
+                local_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
                         error_context=execution_output,
@@ -303,7 +311,7 @@ class EnvAgent:
                 )
                 continue
 
-            func_tch.append(
+            local_tch.append(
                 (
                     {"role": "assistant", "content": raw_response},
                     "gen_sp_egc(success)",
@@ -311,14 +319,14 @@ class EnvAgent:
             )
 
             logger.info(f"EA - {count}-th code - Codegen loop succeed")
-            logger.info(f"EA - {count}-th code - Cache TCH is {len(func_tch)}")
+            logger.info(f"EA - {count}-th code - Cache TCH is {len(local_tch)}")
             logger.debug(f"EA - {count}-th code - Code is \n{code}")
 
-            return code, True, func_tch
+            return code, True, local_tch
 
-        return "", False, func_tch
+        return "", False, local_tch
 
-    def execute_sp_env_infos(
+    def execute_sp_egc_s(
         self, docker_client: DockerClient, container_id: str
     ) -> List[str]:
         """Given a docker client and container ID, will execute stored `self.sp_env_info_getter_codes`
@@ -365,7 +373,7 @@ class EnvAgent:
         )
 
         with open(Path(folder) / file_name, "w") as json_file:
-            json.dump(save_data, json_file, ident=4)
+            json.dump(save_data, json_file, indent=4)
 
 
 class CommonAgent:
@@ -382,6 +390,7 @@ class CommonAgent:
         self,
         bs_env_info_history: List[EnvironmentInfo],
         sp_env_info_history: List[List[str]],
+        prev_strats: List[str],
         in_con_path: str | Path,
     ):
         """Initialize a common agent to be used for strategies generation and space clearing code generation.
@@ -400,16 +409,20 @@ class CommonAgent:
         self.in_con_path = in_con_path
 
         # Add system prompt
-        self.tagged_chat_history.extend(
-            get_system_plist(str(in_con_path), str(bs_env_info_history))
+        self.tagged_chat_history.extend(  #
+            get_system_plist(in_con_path=in_con_path)
+        )
+        # Add basic env inclusion prompt
+        self.tagged_chat_history.extend(  #
+            get_basic_env_plist(bs_eih=bs_env_info_history)
         )
         # Add special env inclusion prompt
-        self.tagged_chat_history.extend(
+        self.tagged_chat_history.extend(  #
             get_special_env_plist(sp_eih=sp_env_info_history)
         )
         # Add strategy gen prompt
         self.tagged_chat_history.extend(  #
-            get_strat_req_plist(in_con_path=in_con_path)
+            get_strat_req_plist(in_con_path=in_con_path, prev_strats=prev_strats)
         )
 
     @property
@@ -421,6 +434,7 @@ class CommonAgent:
         """
 
         return to_normal_plist(self.tagged_chat_history)
+    
 
     def debug_log(self) -> None:
         """Use this to print chat history"""
@@ -469,7 +483,7 @@ class CommonAgent:
         return changes
 
     def save_data(self, space_freed: float, strat: str, folder: Path | str):
-        strat_identifier = [word[0].lower() for word in strat.split(" ")][:10]
+        strat_identifier = str([word[0].lower() for word in strat.split(" ")][:10])
         tch_len = len(self.tagged_chat_history)
         formatted_datetime = datetime.now().strftime("%d%m%y_%H%M")
 
@@ -486,4 +500,4 @@ class CommonAgent:
         )
 
         with open(Path(folder) / file_name, "w") as json_file:
-            json.dump(save_data, json_file, ident=4)
+            json.dump(save_data, json_file, indent=4)

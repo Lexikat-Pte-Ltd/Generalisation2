@@ -1,5 +1,5 @@
 import json
-from typing import Any,  Dict, List, Literal, Tuple, cast
+from typing import Any, Dict, List, Literal, Tuple, cast
 
 from jinja2 import Template
 from loguru import logger
@@ -81,7 +81,7 @@ def _create_oai_genner(client: OpenAI, config: OAIConfig) -> GennerType:
         try:
             response = client.chat.completions.create(
                 model=config.model,
-                response_format=cast(Any, config.response_format),
+                response_format={"type": "json_object"},
                 messages=cast(Any, messages),
                 max_tokens=config.max_tokens,
                 temperature=config.temperature,
@@ -124,8 +124,9 @@ def gen_json_response(
         response_json: Dict[str, str | List[str]] = json.loads(raw_response)
 
         if expected_key not in response_json:
+            keys = ", ".join(response_json.keys())
             raise KeyError(
-                f"Expected key '{expected_key}' not found in generated response"
+                f"Expected key '{expected_key}' not found in generated response, only [{keys}] are found"
             )
 
         return response_json[expected_key], raw_response
