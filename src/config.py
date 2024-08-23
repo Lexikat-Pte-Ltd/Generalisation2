@@ -3,10 +3,16 @@ from typing import Dict, NamedTuple
 
 class DeepseekConfig(NamedTuple):
     endpoint: str = "http://localhost:11434/api/generate"
-    model: str = "deepseek-coder:6.7b"
+    model: str = "deepseek-coder-j:latest"
     stream: bool = False
     add_generation_prompt: bool = True
-    bos_token: str = ""
+    bos_token: str = "<|begin_of_sentence|>"
+    bos_token_2: str = "<｜begin▁of▁sentence｜>"
+    eos_token: str = "<|end_of_sentence|>"
+    eos_token_2: str = "<｜end▁of▁sentence｜>"
+    eot_token: str = "<|EOT|>"
+    eot_token_2: str = "<｜EOT｜>"
+    vertical_bar: str = "｜"
     prefill_response: str = ""
 
 

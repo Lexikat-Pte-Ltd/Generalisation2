@@ -29,13 +29,15 @@ class EnvironmentInfo(BaseModel):
         )
 
     def __str__(self):
-        return dedent(f"""From `free -m` :
-        - total_system_memory: {self.total_system_memory}
-        - available_system_memory: {self.available_system_memory}
-        - running_memory: {self.running_memory}
-        From `df -m /` : 
-        - total_storage: {self.total_storage}
-        - available_storage: {self.available_storage} """)
+        return (
+            "From `free -m` :\n"
+            f"- total_system_memory: {self.total_system_memory}\n"
+            f"- available_system_memory: {self.available_system_memory}\n"
+            f"- running_memory: {self.running_memory}\n"
+            "From `df -m /` :\n"
+            f"- total_storage: {self.total_storage}\n"
+            f"- available_storage: {self.available_storage}"
+        )
 
     def total_files_deleted(self, fresh_env_info: EnvironmentInfo):
         """Assume self as the oldest object.
@@ -44,6 +46,7 @@ class EnvironmentInfo(BaseModel):
             fresh_env_info (EnvironmentInfo): Freshest environment info.
 
         Returns:
+            float: Difference in storage
             bool: If files are indeed managed to be deleted
         """
         old_available_storage = self.available_storage
@@ -55,5 +58,3 @@ class EnvironmentInfo(BaseModel):
             return storage_diff, True
         else:
             return storage_diff, False
-
-

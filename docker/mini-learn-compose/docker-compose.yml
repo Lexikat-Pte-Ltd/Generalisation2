@@ -1,0 +1,12 @@
+services:
+  dev:
+    container_name: mini-learn-compose
+    hostname: mini-learn-compose
+    tty: true
+    build:
+      context: .
+      dockerfile: Dockerfile.mini-learn
+    volumes:
+      - /bin/df:/bin/df:ro
+      - /bin/du:/usr/bin/du:ro
+      - /bin/free:/usr/bin/free:ro

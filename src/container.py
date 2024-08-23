@@ -1,23 +1,37 @@
 from pathlib import Path
 from typing import List, Tuple, cast
 
-from docker import DockerClient
-from docker.models.containers import Container
+import docker.errors
 from loguru import logger
 
+import docker
+from docker import DockerClient
+from docker.models.containers import Container
 from src.data import EnvironmentInfo
 
 
-def safe_container_get(client: DockerClient, container_id: str) -> Container:
-    container = client.containers.get(container_id)
+def safe_container_get(client: DockerClient, container_identifier: str) -> Container:
+    container = client.containers.get(container_identifier)
+
+    try:
+        container = client.containers.get(container_identifier)
+    except docker.errors.NotFound:
+        # If not found, try listing all containers and searching by name
+        all_containers = client.containers.list(all=True)
+        matching_containers = [
+            c for c in all_containers if container_identifier in (c.name, c.id)
+        ]
+        if not matching_containers:
+            logger.error(f"Container not found: {container_identifier}")
+            raise ValueError("Container not found")
+        container = matching_containers[0]
 
     if not isinstance(container, Container):
-        logger.error(
-            f"safe_container_get {client.api.base_url} {container_id[:10]} - Container not found"
-        )
-        raise ValueError("Container not found")
+        logger.error(f"Retrieved object is not a Container: {container_identifier}")
+        raise ValueError("Retrieved object is not a Container")
 
     return container
+
 
 
 def safe_folderlist_bfs(
@@ -119,12 +133,22 @@ def run_code_in_con(
     client: DockerClient, container_id: str, escaped_code: str
 ) -> Tuple[int, str]:
     container = safe_container_get(client, container_id)
-
-    command = f"python -c \"{escaped_code}\""
-
-    # Calculate running and storage space based on available memory
-    result = cast(Tuple[int, bytes], container.exec_run(cmd=command))
+    
+    # Use python -u for unbuffered output
+    # Redirect stderr to stdout to capture all output
+    # Use exec to run in the current environment
+    command = [
+        'python', '-u', '-c',
+        f'import sys; exec({escaped_code!r})',
+        '2>&1'
+    ]
+    
+    result = cast(Tuple[int, bytes], container.exec_run(
+        cmd=command,
+        demux=False,  # Combine stdout and stderr
+        stream=False  # Wait for the command to finish and return all output at once
+    ))
+    
     exit_code, output = result
-
-    return exit_code, output.decode()
+    return exit_code, output.decode('utf-8', errors='replace')
 

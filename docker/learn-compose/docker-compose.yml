@@ -1,6 +1,0 @@
-services:
-  main:
-    tty: true
-    build:
-      context: .
-      dockerfile: Dockerfile.learn_env

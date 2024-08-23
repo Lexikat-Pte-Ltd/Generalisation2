@@ -1,34 +1,97 @@
-.ONESHELL: 
+.ONESHELL:
 
-run-main: up-test-container
+# Dataset related 
+SOURCE_FOLDER := /home/cc/alfath/Generalisation2/data
+PUBLISH_FOLDER := /home/cc/alfath/arabika/data
+DATASET_PATTERN := *_*_*_*_*:*_run_data_at_*_*.json
+
+# Docker compose related 
+MINI_DIR := ./docker/mini-learn-compose
+FEDORA_DIR := ./docker/fedora-learn-compose
+CONTAINER ?= mini
+
+# Set the appropriate directory based on the container type
+ifeq ($(CONTAINER),mini)
+    DOCKER_DIR := $(MINI_DIR)
+    SHELL := /bin/sh
+else ifeq ($(CONTAINER),fedora)
+    DOCKER_DIR := $(FEDORA_DIR)
+    SHELL := /bin/bash
+else
+    $(error Invalid CONTAINER value. Use 'mini' or 'fedora')
+endif
+
+# Main rules
+full-rund: mini-up-container fedora-up-container run-maind
+full-run: mini-up-container fedora-up-container run-main
+
+run-main: 
 	python scripts/main.py
 
-run-main-d: up-test-container
+run-maind: 
 	python scripts/main.py --debug
 
-up-test-container:
-	cd docker/learn-compose/
+# Container-specific rules
+mini-up-container:
+	$(MAKE) CONTAINER=mini up-container
+
+mini-down-container:
+	$(MAKE) CONTAINER=mini down-container
+
+mini-restart-container:
+	$(MAKE) CONTAINER=mini restart-container
+
+mini-rebuild-container:
+	$(MAKE) CONTAINER=mini rebuild-container
+
+mini-attach-container:
+	$(MAKE) CONTAINER=mini attach-container
+
+fedora-up-container:
+	$(MAKE) CONTAINER=fedora up-container
+
+fedora-down-container:
+	$(MAKE) CONTAINER=fedora down-container
+
+fedora-restart-container:
+	$(MAKE) CONTAINER=fedora restart-container
+
+fedora-rebuild-container:
+	$(MAKE) CONTAINER=fedora rebuild-container
+
+fedora-attach-container:
+	$(MAKE) CONTAINER=fedora attach-container
+
+# Dataset 
+archive-data:
+	./scripts/archive_old_runs.sh ./data/
+
+publish-data:
+	@find $(SOURCE_FOLDER) -maxdepth 1 -type f \( -name 'ca*' -o -name 'ea*' \) -exec cp -v {} $(PUBLISH_FOLDER) \;
+
+# Generic Rules
+up-container:
+	cd $(DOCKER_DIR)
 	docker compose up -d
 
-down-test-container:
-	cd docker/learn-compose/
-	docker compose down 
-
-restart-test-container: down-test-container up-test-container
-	cd docker/learn-compose/
-	docker compose logs -f
-
-rebuild-test-container: down-test-container 
-	cd docker/learn-compose/
-	docker compose up -d --build
+down-container:
+	cd $(DOCKER_DIR)
 	docker compose down
 
-attach-test-container:
-	cd docker/learn-compose/ && \
+restart-container: down-container up-container
+	cd $(DOCKER_DIR)
+	docker compose logs -f
+
+rebuild-container: down-container
+	cd $(DOCKER_DIR)
+	docker compose up -d --force-recreate --build
+	docker compose down
+
+attach-container:
+	cd $(DOCKER_DIR) && \
 	SERVICE_NAME=$$(docker compose ps --services | head -n 1) && \
 	if [ -n "$$SERVICE_NAME" ]; then \
-		docker compose exec -it $$SERVICE_NAME /bin/sh; \
+		docker compose exec -it $$SERVICE_NAME $(SHELL); \
 	else \
 		echo "No running service found"; \
 	fi
-

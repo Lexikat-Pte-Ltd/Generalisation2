@@ -1,0 +1,35 @@
+FROM fedora
+
+SHELL ["/bin/bash", "-c"]
+
+RUN dnf in -y openssl openssh-server openssh-clients adb 
+RUN dnf in -y python3 python3-pip python3-psutil procps-ng coreutils util-linux
+# RUN dnf install -y e2fsprogs
+# RUN ssh-keygen -A
+
+ARG username=alice
+ARG doc_to_copy=documents.tar.gz
+
+RUN useradd -mUs /bin/bash ${username}
+
+ADD --chown=${username}:${username} ${doc_to_copy} /home/${username}
+
+ADD --chown=root:root --chmod=777 randomly_encrypt.sh /home/${username}/
+RUN cd /home/${username} && ./randomly_encrypt.sh
+
+ADD --chown=root:root --chmod=777 set_random_permissions.sh /home/${username}/
+RUN cd /home/${username} && ./set_random_permissions.sh
+
+ADD --chown=${username}:${username} .ssh /home/${username}/.ssh
+
+ADD tmp.tar.gz /
+ADD var.tar.gz /
+
+# Create a symlink for python
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
+
+# RUN chattr +i /usr/bin/du /usr/bin/free /usr/bin/df
+
+# CMD ["tail", "-f", "/dev/null"]
+# CMD ["/usr/sbin/sshd","-D"]

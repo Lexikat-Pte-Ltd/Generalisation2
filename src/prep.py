@@ -12,7 +12,7 @@ You are an agent working in a operating system with following information encode
 
 You are tasked with 3 distinct tasks, encoded in \"Tasks\" XML tag, these are
 <Tasks>
-- Writing a code that returns necessary information about the operating system to perform the other tasks you are tasked to perform.
+- Writing set of codes that returns necessary information about the operating system to perform the other tasks you are tasked to perform.
 - Writing set of strategies to free up spaces inside the operating system you are working with.
 - Writing codes to perform these strategies you have originally came up with to free storage spaces inside of the operating system.
 </Tasks>
@@ -96,23 +96,20 @@ def get_basic_env_plist(
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    if len(bs_eih) > 1:
-        inner_env_infos = []
+    assert len(bs_eih) > 0
 
-        for env_info in bs_eih:
-            inner_env_infos.append(
-                SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-                    basic_env_info=str(env_info)
-                )
+    inner_env_infos = []
+
+    for env_info in bs_eih:
+        inner_env_infos.append(
+            SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+                basic_env_info=str(env_info)
             )
+        )
 
-        outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-            basic_env_infos="".join(inner_env_infos[-max_count:])
-        )
-    else:
-        outer_env_infos = SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-            basic_env_info=bs_eih[0]
-        )
+    outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+        basic_env_infos="".join(inner_env_infos[-max_count:])
+    )
 
     return [
         ({"role": "user", "content": outer_env_infos}, tag),
@@ -185,27 +182,22 @@ def get_special_env_plist(
             function.
     """
     assert len(sp_eih) > 0, "sp_eih must not be empty"
+    flat_sp_eih = [item for history in sp_eih for item in history]
 
-    if len(sp_eih) > 1:
-        # If there is more than one point of time at the history, then format each time of the history
-        # each set and combine them into a single string.
-        inner_env_infos = []
+    # If there is more than one point of time at the history, then format each time of the history
+    # each set and combine them into a single string.
+    inner_env_infos = []
 
-        for env_infos in sp_eih:
-            for env_info in env_infos:
-                inner_env_infos.append(
-                    SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
-                        special_env_info=env_info
-                    )
-                )
-        outer_env_infos = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
-            special_env_infos="".join(inner_env_infos[-max_count:])
+    for sp_ei in flat_sp_eih[-max_count:]:
+        inner_env_infos.append(
+            SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
+                special_env_info=sp_ei.strip()
+            )
         )
-    else:
-        # If there is only a time at the history then format the single set of information.
-        outer_env_infos = SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
-            special_env_info=sp_eih[0]
-        )
+
+    outer_env_infos = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
+        special_env_infos="\n".join(inner_env_infos).strip()
+    )
 
     # Return a list containing a single tagged message.
     return [
@@ -216,10 +208,19 @@ def get_special_env_plist(
 STRAT_REQ_TEMPLATE = """
 Given the previous context, generate a few specific potential strategies as an AI agent to achieve freeing up some disk space for the directory `{in_con_path}`. 
 Here also a list of previous strat that youve used. You are encouraged to use new strategies not in the list.
-<PreviousStrats>
+
 {prev_strats}
-</PreviousStrats>
-Please generate the task in json list exactly formatted like {{"list": ["strategy1", "strategy2", ... "strategyN"]}}. 
+
+Please generate the list in python markdown block. Like below
+```python
+strats = [
+    "strategy1",
+    "strategy2",
+    ...
+    "strategyN",
+]
+
+Replace "strategy1", etc. with actual strategies. Include minimum of 10 strategies. Output only the JSON object, nothing else.
 """.strip()
 STRAT_REQ_PLIST_TAG = "get_strat_req_plist"
 
@@ -252,7 +253,14 @@ def get_strat_req_plist(
     Returns:
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
-    formatted_prev_strats = "\n".join(f"- {strat}" for strat in prev_strats)
+    if prev_strats:
+        formatted_prev_strats = (
+            "<PrevStrats>\n"
+            + "\n".join(f"- {strat}" for strat in prev_strats)
+            + "\n</PrevStrats>\n"
+        )
+    else:
+        formatted_prev_strats = ""
 
     strat_prompt = STRAT_REQ_TEMPLATE.format(
         in_con_path=str(in_con_path),  #
@@ -265,14 +273,24 @@ def get_strat_req_plist(
 
 
 SPECIAL_EGC_REQ_TEMPLATE = """
-Given the previous context, generate python code for obtaining special environment description that is going to assists you with tasks defined in the system prompt.
-You are working in the directory of {in_con_path}.
-Be original, unique, and create other information that has yet existed in the previous environment info.
-Also use default python library and nothing else.
-Please generate the code in json format exactly formatted like {{"code": "import ... "}}. 
-The code are expected to print out string to stdout containing environment information.
-If there is another code you have previously generated, be different and unique to the previous one.
-DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`for without installing another new library.
+Generate unique Python code to obtain a special environment description for tasks in the system prompt.
+Current working directory: {in_con_path}
+Requirements:
+- Be original and create information not present in previous environment info.
+- Use only Python standard library.
+- Output format: ```python\\n{{code}}```.
+- Code must print environment information to stdout as a string.
+- Ensure the code differs from any previously generated code.
+- Exclude all comments.
+- Use single (') and double (") unicode quotes in the code.
+- Avoid multiline strings.
+- Ensure all string literals are properly escaped.
+- Limit to a single print statement at the end, concatenating all info.
+- Prioritize using less common but standard Python libraries for uniqueness.
+- You should only generate 1 single ```python\\n{{code}}``` block.
+- Do not write into a file, you are to just print the environment information to standard output.
+
+The code should be concise, functional, and adhere strictly to these guidelines.
 """.strip()
 
 SPECIAL_EGC_REQ_PLIST_TAG = "get_special_egc_req_plist"
@@ -316,10 +334,23 @@ def get_special_egc_req_plist(
 
 
 STRAT_CODE_REQ_TEMPLATE = """
-Given the previous context, generate python code for the task \"{task_description}\".
-Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}. 
-DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`.
-Code :\n
+Given the previous context, generate unique Python code for the strat "{strat}".
+
+Requirements:
+- Be original and create code not present in previous responses.
+- Use only Python standard library.
+- Output format: ```python\\n{{code}}```.
+- Code must print task-related information to stdout as a string.
+- Ensure the code differs from any previously generated code.
+- Exclude all comments.
+- Use single (') and double (") unicode quotes in the code.
+- Avoid multiline strings.
+- Ensure all string literals are properly escaped.
+- Limit to a single print statement at the end, concatenating all info.
+- Prioritize using less common but standard Python libraries for uniqueness.
+- Generate code that can be run using Python's `eval()`.
+
+The code should be concise, functional, and adhere strictly to these guidelines. Generate only one JSON object containing the entire Python code.
 """.strip()
 
 STRAT_CODE_REQ_TAG = "get_strat_code_req_plist"
@@ -327,7 +358,7 @@ STRAT_CODE_REQ_TAG = "get_strat_code_req_plist"
 
 # Used by basic agent
 def get_strat_code_req_plist(
-    task_description: str,
+    strat: str,
     tag=STRAT_CODE_REQ_TAG,
 ) -> List[TaggedMessage]:
     """(User, CommonAgent, GenerationRequest, CodeOutput)
@@ -354,7 +385,7 @@ def get_strat_code_req_plist(
         List[TaggedMessage]: TaggedMessages to append to caller's chat history.
     """
     code_prompt = STRAT_CODE_REQ_TEMPLATE.format(
-        task_description=task_description  #
+        strat=strat  #
     )
 
     return [
@@ -363,12 +394,27 @@ def get_strat_code_req_plist(
 
 
 REGEN_TEMPLATE = """
-Output of the code above is after running it on {run_context} is:
+Output of the code above after running it on {run_context} is:
 {error_context}
-Please improve upon the code you have written by keeping in mind the error output above where task is {task_description}.
-Please generate the code in JSON format exactly formatted like {{"code": "import ... "}}. 
-DO NOT GENERATE ANY COMMENTS, you are expected to generate code that can be run using python's `eval()`.
-Code :\n
+
+Given this error output, improve upon the code you have written for the task "{task_description}".
+
+Requirements:
+- Address the specific issues highlighted in the error output.
+- Use only Python standard library.
+- Output format: ```python\\n{{improved_code_here}}```
+- Code must print task-related information to stdout as a string.
+- Ensure the improved code differs from the previous version.
+- Exclude all comments.
+- Use single (') and double (") unicode quotes in the code.
+- Avoid multiline strings.
+- Ensure all string literals are properly escaped.
+- Limit to a single print statement at the end, concatenating all info.
+- Prioritize using less common but standard Python libraries for uniqueness.
+- Generate code that can be run using Python's `eval()`.
+- Provide only one ```python code block.
+
+The improved code should be concise, functional, and adhere strictly to these guidelines. Generate only one ```python code block containing the entire improved Python code.
 """.strip()
 
 USER_CODE_REGEN_TAG = "get_code_regen_plist"

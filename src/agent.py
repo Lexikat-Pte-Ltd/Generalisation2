@@ -1,19 +1,29 @@
 import copy
+import json
 from datetime import datetime
 from fileinput import filename
-import json
 from pathlib import Path
 from typing import Callable, List, OrderedDict, Tuple
 
+import yaml
 from loguru import logger
-from docker import DockerClient
 
+from docker import DockerClient
 from src.code import (
     is_valid_code_ast,
     is_valid_code_compiler,
 )
-from src.helper import format_ch, format_tch, to_normal_plist
+from src.container import run_code_in_con
 from src.data import EnvironmentInfo
+from src.gen import Genner
+from src.helper import (
+    dict_representer,
+    format_ch,
+    format_tch,
+    process_old_tch,
+    represent_multiline_str,
+    to_normal_plist,
+)
 from src.prep import (
     BASIC_ENV_PLIST_TAG,
     SPECIAL_EGC_REQ_PLIST_TAG,
@@ -22,13 +32,11 @@ from src.prep import (
     get_basic_env_plist,
     get_code_regen_plist,
     get_special_egc_req_plist,
+    get_special_env_plist,
     get_strat_req_plist,
     get_system_plist,
-    get_special_env_plist,
 )
-from src.gen import gen_code, gen_list
 from src.types import Message, TaggedMessage
-from src.container import run_code_in_con
 
 
 class EnvAgent:
@@ -125,9 +133,9 @@ class EnvAgent:
         self,
         count: int,
         in_con_path: str | Path,
-        genner: Callable,
+        genner: Genner,
         docker_client: DockerClient,
-        testing_container_id: str,
+        test_container_id: str,
         max_attempts: int = 5,
     ) -> Tuple[List[TaggedMessage], List[str]]:
         """Generate multiple SP EGC (Special Environment Info Getter Code)
@@ -157,7 +165,7 @@ class EnvAgent:
                 count=i,
                 genner=genner,
                 docker_client=docker_client,
-                testing_container_id=testing_container_id,
+                testing_container_id=test_container_id,
                 max_attempts=max_attempts,
             )
 
@@ -181,7 +189,7 @@ class EnvAgent:
     def gen_single_sp_egc(
         self,
         count: int,
-        genner: Callable,
+        genner: Genner,
         docker_client: DockerClient,
         testing_container_id: str,
         max_attempts: int = 5,
@@ -223,8 +231,7 @@ class EnvAgent:
             logger.debug(
                 (
                     f"EA - {count}-th code - {attempt}-th attempt - ",
-                    f"EnvAgent's in loop tagged chat history - \n {
-                        format_tch(self.tagged_chat_history)}",
+                    f"EnvAgent's in loop tagged chat history - \n {format_tch(self.tagged_chat_history)}",
                 )
             )
 
@@ -235,8 +242,7 @@ class EnvAgent:
                 )
             )
 
-            code, raw_response = gen_code(
-                genner,
+            code, raw_response = genner.generate_code(
                 to_normal_plist(self.tagged_chat_history) + to_normal_plist(local_tch),
             )
 
@@ -250,7 +256,7 @@ class EnvAgent:
 
                 local_tch.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "gen_sp_egc(ast_fail)",
                     )
                 )
@@ -267,20 +273,20 @@ class EnvAgent:
             if not compile_valid:
                 logger.error(
                     f"EA - {count}-th code - {attempt}-th attempt - "
-                    f"Native `compile` error \n{ast_error}"
+                    f"Native `compile` error \n{compiler_error}"
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
                 local_tch.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "gen_sp_egc(compile_fail)",
                     )
                 )
                 local_tch.extend(
                     get_code_regen_plist(
                         task_description="Generate and test code for getting non-basic environment info",
-                        error_context=ast_error,
+                        error_context=compiler_error,
                         run_context="a Python native compiler",
                     )
                 )
@@ -292,13 +298,13 @@ class EnvAgent:
             if exit_code != 0:
                 logger.error(
                     f"EA - {count}-th code - {attempt}-th attempt - "
-                    f"In container error \n{ast_error}"
+                    f"In container error \n{execution_output}"
                 )
                 logger.debug(f"EA - Code is \n{code}")
 
                 local_tch.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "gen_sp_egc(container_fail)",
                     )
                 )
@@ -310,10 +316,31 @@ class EnvAgent:
                     )
                 )
                 continue
+            if execution_output.strip() == "":
+                logger.error(
+                    f"EA - {count}-th code - {attempt}-th attempt - "
+                    f"The code doesnt return any output"
+                )
+                logger.debug(f"EA - Code is \n{code}")
+
+                local_tch.append(
+                    (
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
+                        "gen_sp_egc(container_fail)",
+                    )
+                )
+                local_tch.extend(
+                    get_code_regen_plist(
+                        task_description="Generate and test code for getting non-basic environment info",
+                        error_context="No files are being freed or deleted",
+                        run_context="a Docker container",
+                    )
+                )
+                continue
 
             local_tch.append(
                 (
-                    {"role": "assistant", "content": raw_response},
+                    {"role": "assistant", "content": f"```python\n{code}\n```"},
                     "gen_sp_egc(success)",
                 )
             )
@@ -359,21 +386,28 @@ class EnvAgent:
         self.sp_env_info_getter_codes.append(code)
 
     def save_data(self, folder: Path | str):
+        import yaml
+
+        yaml.add_representer(str, represent_multiline_str)
+
         tch_len = len(self.tagged_chat_history)
-        formatted_datetime = datetime.now().strftime("%d%m%y_%H%M")
-        file_name = f"{formatted_datetime}_run_data_at_{tch_len}"
+        formatted_datetime = datetime.now().strftime("%Y_%m_%d_%H:%M")
+        file_name = f"ea_{formatted_datetime}_run_data_at_{tch_len}.yaml"
 
-        # Save the sequential one
-        save_data = OrderedDict(
-            [
-                ("tag", "[history, env_agent]"),
-                ("sp_egc_s", self.sp_env_info_getter_codes),
-                ("tagged_chat_history", self.tagged_chat_history),
-            ]
-        )
+        save_data = {
+            "tag": "[history, env_agent]",
+            "sp_egc_s": self.sp_env_info_getter_codes,
+            "tagged_chat_history": process_old_tch(self.tagged_chat_history),
+        }
 
-        with open(Path(folder) / file_name, "w") as json_file:
-            json.dump(save_data, json_file, indent=4)
+        with open(Path(folder) / file_name, "w") as yaml_file:
+            yaml.dump(
+                save_data,
+                yaml_file,
+                width=100,
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
 
 class CommonAgent:
@@ -434,14 +468,13 @@ class CommonAgent:
         """
 
         return to_normal_plist(self.tagged_chat_history)
-    
 
     def debug_log(self) -> None:
         """Use this to print chat history"""
 
         logger.debug(format_tch(self.tagged_chat_history))
 
-    def gen_strats(self, genner: Callable) -> Tuple[List[str], str]:
+    def gen_strats(self, genner: Genner) -> Tuple[List[str], str]:
         """Given an OAI client, will generate strategies based on the current chat history
         containing system prompt, initial environment info, and special environment info found by
         executing special environment info getters on a specified container.
@@ -453,7 +486,7 @@ class CommonAgent:
             strategies: List of string that are strategies.
         """
 
-        return gen_list(genner, self.tagged_chat_history)
+        return genner.generate_list(self.tagged_chat_history)
 
     def update_env_info_state(
         self,
@@ -483,21 +516,41 @@ class CommonAgent:
         return changes
 
     def save_data(self, space_freed: float, strat: str, folder: Path | str):
-        strat_identifier = str([word[0].lower() for word in strat.split(" ")][:10])
+        import yaml
+
+        yaml.add_representer(str, represent_multiline_str)
+
+        strat_identifier = "".join(
+            [word[0].lower() for word in strat.split(" ") if word.isalpha()][:10]
+        )
         tch_len = len(self.tagged_chat_history)
-        formatted_datetime = datetime.now().strftime("%d%m%y_%H%M")
+        formatted_datetime = datetime.now().strftime("%Y_%m_%d_%H:%M")
 
-        file_name = f"{formatted_datetime}_ca_run_data_at_{tch_len}_{strat_identifier}"
-
-        # Save the sequential one
-        save_data = OrderedDict(
-            [
-                ("tag", "[history, common_agent]"),
-                ("strat", strat),
-                ("space_freed", space_freed),
-                ("tagged_chat_history", self.tagged_chat_history),
-            ]
+        file_name = (
+            f"ca_{formatted_datetime}_run_data_at_{tch_len}_{strat_identifier}.yaml"
         )
 
-        with open(Path(folder) / file_name, "w") as json_file:
-            json.dump(save_data, json_file, indent=4)
+        # Save the sequential one
+        save_data = {
+            "tag": "[history, common_agent]",
+            "strat": strat,
+            "space_freed": space_freed,
+            "tagged_chat_history": process_old_tch(self.tagged_chat_history),
+        }
+        # save_data = OrderedDict(
+        #     [
+        #         ("tag", "[history, common_agent]"),
+        #         ("strat", strat),
+        #         ("space_freed", space_freed),
+        #         ("tagged_chat_history", self.tagged_chat_history),
+        #     ]
+        # )
+
+        with open(Path(folder) / file_name, "w") as yaml_file:
+            yaml.dump(
+                save_data,
+                yaml_file,
+                width=100,
+                default_flow_style=False,
+                sort_keys=False,
+            )

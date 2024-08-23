@@ -22,17 +22,18 @@ from src.prep import (
     get_code_regen_plist,
     get_strat_code_req_plist,
 )
-from src.gen import create_genner, gen_code
+from src.gen import get_genner
 from src.agent import EnvAgent, CommonAgent
 
 load_dotenv()
 
-EA_MAX_ATTEMPTS = 5
+EA_MAX_ATTEMPTS = 20
 EA_MAX_SP_EGC = 2
 CA_MAX_ATTEMPTS = 3
 
-CONTAINER_ID = "learn-compose-main-1"
-BACKEND = cast(Literal["oai", "deepseek"], os.getenv("BACKEND", "oai"))
+FEDORA_CONTAINER_ID = "fedora-learn-compose"
+TEST_CONTAINER_ID = "mini-learn-compose"
+BACKEND = "deepseek"
 OAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 if BACKEND == "oai":
@@ -40,10 +41,12 @@ if BACKEND == "oai":
 
 oai_client = OpenAI(api_key=OAI_API_KEY)
 docker_client = docker.from_env()
-genner = create_genner(BACKEND, oai_client=oai_client)
+genner = get_genner(BACKEND, oai_client=oai_client)
 
 
-def main(debug: bool, always_success: bool):
+def main(
+    debug: bool, always_success: bool, main_container_id: str, test_container_id: str
+):
     save_folder = Path() / "data"
     prev_strats = scan_json_files_for_strat(save_folder)
     # In container path for work path purposes
@@ -52,7 +55,7 @@ def main(debug: bool, always_success: bool):
     # Get basic initial env info
     logger.info("Initializing basic environment info.")
     initial_basic_env_info: EnvironmentInfo = safe_detect_env(
-        docker_client, CONTAINER_ID
+        docker_client, main_container_id
     )
 
     # Initiate env agent
@@ -68,16 +71,16 @@ def main(debug: bool, always_success: bool):
         in_con_path=in_con_path,
         genner=genner,
         docker_client=docker_client,
-        testing_container_id=CONTAINER_ID,
+        test_container_id=test_container_id,
         max_attempts=EA_MAX_ATTEMPTS,
     )
     ea.tagged_chat_history.extend(new_tch)
     ea.sp_env_info_getter_codes.extend(new_sp_egc_s)
 
     # Execute all env getting codes that has obtained
-    logger.info(f"EA - Executing all SP EGC code on container {CONTAINER_ID} ...")
+    logger.info(f"EA - Executing all SP EGC code on container {main_container_id} ...")
     initial_special_env_infos = ea.execute_sp_egc_s(
-        docker_client=docker_client, container_id=CONTAINER_ID
+        docker_client=docker_client, container_id=main_container_id
     )
 
     # Update env_agent's state
@@ -95,7 +98,10 @@ def main(debug: bool, always_success: bool):
     # Generate strats based on the new env infos
     strats, raw_strats = ca.gen_strats(genner)
     ca.tagged_chat_history.append(
-        ({"role": "assistant", "content": raw_strats}, "gen_strats")
+        (
+            {"role": "assistant", "content": f"```python\nlist = {raw_strats}```"},
+            "gen_strats",
+        )
     )
 
     # Strat deletion strats :
@@ -116,12 +122,14 @@ def main(debug: bool, always_success: bool):
         copy_ca = deepcopy(ca)
 
         # Get fresh env info
-        loop_bs_env_info = safe_detect_env(docker_client, CONTAINER_ID)
+        loop_bs_env_info = safe_detect_env(docker_client, main_container_id)
 
         # Update env agent
         ea.bs_env_info_history.append(loop_bs_env_info)
         ea.sp_env_info_history.append(
-            ea.execute_sp_egc_s(docker_client=docker_client, container_id=CONTAINER_ID)
+            ea.execute_sp_egc_s(
+                docker_client=docker_client, container_id=main_container_id
+            )
         )
 
         # Update the env info state of the common agent with the 2 fresh env infos
@@ -142,22 +150,20 @@ def main(debug: bool, always_success: bool):
         )
 
         # Prepare the common agent chat history with prep prompts
-        copy_ca.tagged_chat_history.extend(
-            get_strat_code_req_plist(task_description=strat)
-        )
+        copy_ca.tagged_chat_history.extend(get_strat_code_req_plist(strat=strat))
 
         # Gen some codes
         attempt = 0
+        space_freed = 0
         while attempt < CA_MAX_ATTEMPTS:
             logger.debug(
                 (
                     f"CA - {i}-th code - {attempt}-th attempt - ",
-                    f"CommonAgent's in loop tagged chat history - \n{
-                        format_tch(copy_ca.tagged_chat_history)}",
+                    f"CommonAgent's in loop tagged chat history - \n{format_tch(copy_ca.tagged_chat_history)}",
                 )
             )
 
-            code, raw_response = gen_code(genner, copy_ca.chat_history)
+            code, raw_response = genner.generate_code(copy_ca.chat_history)
 
             ast_valid, ast_error = is_valid_code_ast(code)
             if not ast_valid:
@@ -169,7 +175,7 @@ def main(debug: bool, always_success: bool):
 
                 copy_ca.tagged_chat_history.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "strat_codegen(ast_fail)",
                     )
                 )
@@ -195,7 +201,7 @@ def main(debug: bool, always_success: bool):
 
                 copy_ca.tagged_chat_history.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "strat_codegen(compile_fail)",
                     )
                 )
@@ -211,7 +217,7 @@ def main(debug: bool, always_success: bool):
                 continue
 
             exit_code, execution_output = run_code_in_con(
-                docker_client, CONTAINER_ID, code
+                docker_client, test_container_id, code
             )
             if exit_code != 0:
                 logger.error(
@@ -222,7 +228,7 @@ def main(debug: bool, always_success: bool):
 
                 copy_ca.tagged_chat_history.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "strat_codegen(container_fail)",
                     )
                 )
@@ -237,12 +243,40 @@ def main(debug: bool, always_success: bool):
                 attempt += 1
                 continue
 
-            fresh_basic_env_info = safe_detect_env(docker_client, CONTAINER_ID)
-            storage_changes, files_deleted = loop_bs_env_info.total_files_deleted(
+            if execution_output.strip() == "":
+                logger.error(
+                    f"CA - {i}-th strat - {attempt + 1}-th attempt - "
+                    f"The code doesnt return any output"
+                )
+                logger.debug(f"CA - Code is \n{code}")
+
+                copy_ca.tagged_chat_history.append(
+                    (
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
+                        "strat_codegen(container_fail)",
+                    )
+                )
+                copy_ca.tagged_chat_history.extend(
+                    get_code_regen_plist(
+                        task_description=f"Generate code to perform {strat}",
+                        error_context="No code output",
+                        run_context="a Docker container",
+                    )
+                )
+
+                attempt += 1
+                continue
+
+            # The code is compile-able and can be executed in test container
+            # Time to test it on real container
+            exit_code, execution_output = run_code_in_con(
+                docker_client, main_container_id, code
+            )
+
+            fresh_basic_env_info = safe_detect_env(docker_client, main_container_id)
+            space_freed, files_deleted = loop_bs_env_info.total_files_deleted(
                 fresh_basic_env_info
             )
-            if debug:
-                storage_changes = 100
 
             if not files_deleted:
                 logger.error(
@@ -253,7 +287,7 @@ def main(debug: bool, always_success: bool):
 
                 copy_ca.tagged_chat_history.append(
                     (
-                        {"role": "assistant", "content": raw_response},
+                        {"role": "assistant", "content": f"```python\n{code}\n```"},
                         "strat_codegen(deletion_fail)",
                     )
                 )
@@ -268,13 +302,13 @@ def main(debug: bool, always_success: bool):
                 attempt += 1
                 continue
 
-        if attempt >= CA_MAX_ATTEMPTS:
+        if attempt > CA_MAX_ATTEMPTS:
             logger.info(f"CA - {i}-th strat - Codegen loop ended up in failure")
         else:
             logger.info(f"CA - {i}-th strat - Codegen loop ended up in success")
             copy_ca.tagged_chat_history.append(
                 (
-                    {"role": "assistant", "content": raw_response},
+                    {"role": "assistant", "content": f"```python\n{code}\n```"},
                     "strat_codegen(success)",
                 )
             )
@@ -282,7 +316,7 @@ def main(debug: bool, always_success: bool):
         logger.debug(f"CA - {i}-th strat - Code is \n{code}")
 
         copy_ca.save_data(
-            space_freed=storage_changes,  # No space freed but can be useful maybe
+            space_freed=space_freed,
             strat=strat,
             folder=save_folder,
         )
@@ -300,8 +334,8 @@ if __name__ == "__main__":
     parser.add_argument("-as", "--always-success", action="store_true")
     args = parser.parse_args()
 
-    if not args.debug:
-        logger.remove()
+    # Remove all existing handlers
+    logger.remove()
 
     logger_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
@@ -309,6 +343,7 @@ if __name__ == "__main__":
         "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | {message}"
     )
 
+    # Add only one handler with the appropriate level
     logger.add(
         sys.stderr,
         backtrace=args.debug,
@@ -317,4 +352,16 @@ if __name__ == "__main__":
         level="DEBUG" if args.debug else "INFO",
     )
 
-    main(debug=args.debug, always_success=args.always_success)
+    main_container_id = (
+        "fedora-learn-compose"
+        if "fedora" == os.getenv("CONTAINER", "fedora")
+        else "debian-learn-compose-dev"
+    )
+    test_container_id = "mini-learn-compose"
+
+    main(
+        debug=args.debug,
+        always_success=args.always_success,
+        main_container_id=main_container_id,
+        test_container_id=test_container_id,
+    )

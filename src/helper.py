@@ -1,33 +1,37 @@
 import json
+import re
 import shutil
 from pathlib import Path
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 from loguru import logger
+from unidecode import unidecode
+import yaml
 
 from src.data import EnvironmentInfo
-from src.types import Message, TaggedMessage
+from src.types import Message, TaggedMessage, TaggedPList
 
 
 def scan_json_files_for_strat(folder_path):
     strat_list = []
     folder = Path(folder_path)
-    
+
     # Iterate through all JSON files in the specified folder
-    for file_path in folder.glob('*.json'):
+    for file_path in folder.glob("*.json"):
         try:
-            with file_path.open('r') as file:
+            with file_path.open("r") as file:
                 data = json.load(file)
-                
+
                 # Check if 'strat' key exists directly in the JSON data
-                if 'strat' in data:
-                    strat_list.append(data['strat'])
+                if "strat" in data:
+                    strat_list.append(data["strat"])
         except json.JSONDecodeError:
             print(f"Error decoding JSON in file: {file_path.name}")
         except IOError:
             print(f"Error reading file: {file_path.name}")
-    
+
     return strat_list
+
 
 def to_normal_plist(tagplist: Sequence[TaggedMessage]) -> List[Message]:
     result = [tupl[0] for tupl in tagplist]
@@ -152,3 +156,43 @@ def format_eih(environment_info_history: List[EnvironmentInfo]) -> str:
 
     to_print += "]"
     return to_print
+
+
+def sanitize_code(code: str):
+    code = unidecode(code)
+
+    code = code.replace(""", "'").replace(""", "'").replace('"', '"').replace('"', '"')
+
+    # Replace full-width vertical bar with standard vertical bar
+    code = code.replace("｜", "|")
+
+    # Replace other potential problematic characters
+    code = code.replace("…", "...")
+
+    # Use regex to find and replace any remaining non-ASCII characters
+    code = re.sub(r"[^\x00-\x7F]+", "", code)
+
+    return code
+
+
+def dict_representer(dumper, data):
+    return dumper.represent_dict(data.items())
+
+
+def process_old_tch(old_tch: TaggedPList) -> List[Dict]:
+    new_tch = []
+    for item in old_tch:
+        if isinstance(item, list) and len(item) == 2:
+            new_tch.append({"message": item[0], "tag": item[1]})
+        elif isinstance(item, dict) and "message" in item and "tag" in item:
+            new_tch.append(item)
+        else:
+            print(f"Unexpected format: {item}")
+
+    return new_tch
+
+
+def represent_multiline_str(dumper: yaml.Dumper, data: str) -> yaml.nodes.ScalarNode:
+    if len(data.splitlines()) > 1:  # check for multiline string
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)

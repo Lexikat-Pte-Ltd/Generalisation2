@@ -1,166 +1,212 @@
+import ast
 import json
+from abc import ABC, abstractmethod
+import re
 from typing import Any, Dict, List, Literal, Tuple, cast
 
+import requests
 from jinja2 import Template
 from loguru import logger
 from openai import OpenAI
-import requests
+from unidecode import unidecode
 
 from src.config import DeepseekConfig, OAIConfig
-from src.helper import format_ch, to_normal_plist
-from src.types import Message, TaggedMessage, GennerType
+from src.helper import to_normal_plist
+from src.types import Message, TaggedMessage
 
-
-DEEPSEEK_TEMPLATE = """
-{%- if not add_generation_prompt is defined -%}
-{%- set add_generation_prompt = false -%}
-{%- endif -%}
-{%- set ns = namespace(found=false) -%}
+DEEPSEEK_TEMPLATE = """{%- set ns = namespace(found=false, last_role=None) -%}
 {%- for message in messages -%}
     {%- if message['role'] == 'system' -%}
         {%- set ns.found = true -%}
     {%- endif -%}
 {%- endfor -%}
-{{bos_token}}{%- if not ns.found -%}
-{{'You are an AI programming assistant, utilizing the Deepseek Coder model, developed by Deepseek Company, and you only answer questions related to computer science. For politically sensitive questions, security and privacy issues, and other non-computer science questions, you will refuse to answer\\n'}}
-{%- endif %}
 {%- for message in messages %}
     {%- if message['role'] == 'system' %}
 {{ message['content'] }}
     {%- else %}
         {%- if message['role'] == 'user' %}
-{{'### Instruction:\\n' + message['content'] + '\\n'}}
-        {%- else %}
-{{'### Response:\\n' + message['content'] + '\\n<|EOT|>\\n'}}
+            {%- if ns.last_role == 'assistant' %}
+{{'### Instruction:\n' + message['content'] + '\n'}}
+            {%- else %}
+{{ message['content'] + '\n' }}
+            {%- endif %}
+        {%- elif message['role'] == 'assistant' %}
+{{'### Response:\n' + message['content'] + '\n'}}
         {%- endif %}
     {%- endif %}
+    {%- set ns.last_role = message['role'] %}
 {%- endfor %}
-{% if add_generation_prompt %}
-{{'### Response:\\n'}}
-{%- endif -%}
+### Response:
+{% if force_python %}
+```python
+{% endif %}
 """.strip()
 
 
-def _create_deepseek_genner(
-    config: DeepseekConfig,
-) -> GennerType:
-    def genner(messages: List[Message]) -> str:
-        template = Template(DEEPSEEK_TEMPLATE)
+class Genner(ABC):
+    @abstractmethod
+    def generate(self) -> str:
+        pass
 
+    @abstractmethod
+    def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
+        pass
+
+    @abstractmethod
+    def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
+        pass
+
+
+class DeepseekGenner(Genner):
+    def __init__(self, config: DeepseekConfig):
+        self.config = config
+
+    def generate(self, messages: List[Message], force_python=False) -> str:
+        template = Template(DEEPSEEK_TEMPLATE)
         prompt = template.render(
             messages=messages,
-            add_generation_prompt=config.add_generation_prompt,
-            bos_token=config.bos_token,
+            force_python=force_python,
+            add_generation_prompt=self.config.add_generation_prompt,
+            bos_token=self.config.bos_token,
         )
 
         logger.debug(f"Raw prompt - \n {prompt}")
 
         payload = {
-            "model": config.model,
+            "model": self.config.model,
             "prompt": prompt,
-            "stream": config.stream,
-            "format": "json",
-            "raw": True,
+            "stream": self.config.stream,
         }
 
         try:
-            response = requests.post(config.endpoint, json=payload)
-
+            response = requests.post(self.config.endpoint, json=payload)
             response.raise_for_status()
-
             return response.json()["response"]
         except requests.RequestException as e:
             logger.error(f"API request failed: {str(e)}")
             raise
 
-    return genner
+    @staticmethod
+    def _extract_code(response: str) -> str:
+        # Extract code from the response
+        regex_pattern = r"```python\n([\s\S]*?)```"
+        code_match = re.search(regex_pattern, response, re.DOTALL)
+        assert code_match is not None
+
+        code_string = code_match.group(1)
+        assert code_string is not None
+
+        return code_string
+
+    def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
+        while True:
+            try:
+                raw_response = self.generate(messages, force_python=False)
+
+                processed_code = self._extract_code(raw_response)
+                processed_code = (
+                    processed_code
+                    .replace(self.config.bos_token, "")
+                    .replace(self.config.bos_token_2, "")
+                    .replace(self.config.eos_token, "")
+                    .replace(self.config.eos_token_2, "")
+                    .replace(self.config.eot_token, "")
+                    .replace(self.config.eot_token_2, "")
+                    .replace(self.config.vertical_bar, "|")
+                    .strip()
+                )
+
+                logger.info(f"Processed code - \n{processed_code}")
+
+                return processed_code, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating code occured: {e}")
+                logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_list(response: str) -> List[str]:
+        start = response.index("[")
+        end = response.rindex("]") + 1
+        list_string = response[start:end]
+
+        # Parse the string to a Python list
+        processed_list = ast.literal_eval(list_string)
+
+        assert isinstance(processed_list, list)
+        assert all(isinstance(item, str) for item in processed_list)
+
+        return processed_list
+
+    def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
+        # Deepseek-specific list generation logic
+        while True:
+            try:
+                raw_response = self.generate(to_normal_plist(messages))
+                processed_list = self._extract_list(raw_response)
+
+                return processed_list, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating list occured: {e}")
+                logger.error("Retrying...")
 
 
-def _create_oai_genner(client: OpenAI, config: OAIConfig) -> GennerType:
-    def genner(messages: List[Message]) -> str:
+class OAIGenner(Genner):
+    def __init__(self, client: OpenAI, config: OAIConfig):
+        self.client = client
+        self.config = config
+
+    def generate(self, messages: List[Message]) -> str:
         try:
-            response = client.chat.completions.create(
-                model=config.model,
+            response = self.client.chat.completions.create(
+                model=self.config.model,
                 response_format={"type": "json_object"},
                 messages=cast(Any, messages),
-                max_tokens=config.max_tokens,
-                temperature=config.temperature,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
             )
             assert isinstance(response.choices[0].message.content, str)
-
             return response.choices[0].message.content
-
         except Exception as e:
             logger.error(f"OpenAI API request failed: {str(e)}")
             raise
 
-    return genner
+    def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
+        raw_response = self.generate(messages)
+        response_json = json.loads(raw_response)
+        processed_code = response_json.get("code", "")
+
+        return processed_code, raw_response
+
+    def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
+        raw_response = self.generate(to_normal_plist(messages))
+        response_json = json.loads(raw_response)
+        list_response = response_json.get("list", [])
+
+        if isinstance(list_response, str):
+            processed_list = json.loads(list_response)
+        else:
+            processed_list = list_response
+
+        assert isinstance(processed_list, list)
+        assert all(isinstance(item, str) for item in processed_list)
+
+        return processed_list, raw_response
 
 
-def create_genner(
+def get_genner(
     backend: Literal["deepseek", "oai"],
     deepseek_config: DeepseekConfig = DeepseekConfig(),
     oai_config: OAIConfig = OAIConfig(),
     oai_client: OpenAI | None = None,
-) -> GennerType:
+) -> Genner:
     if backend == "deepseek":
-        return _create_deepseek_genner(deepseek_config)
+        return DeepseekGenner(deepseek_config)
     elif backend == "oai":
         if not oai_client:
             raise ValueError("OpenAI client is required for OAI backend")
-        return _create_oai_genner(oai_client, oai_config)
-
-
-def gen_json_response(
-    genner: GennerType,
-    messages: List[Message],
-    expected_key: str,
-) -> Tuple[str | List[str], str]:
-    try:
-        logger.debug(f"Messages - \n {format_ch(messages)}")
-        raw_response = genner(messages)
-
-        logger.debug(f"Raw Response - \n {raw_response}")
-        response_json: Dict[str, str | List[str]] = json.loads(raw_response)
-
-        if expected_key not in response_json:
-            keys = ", ".join(response_json.keys())
-            raise KeyError(
-                f"Expected key '{expected_key}' not found in generated response, only [{keys}] are found"
-            )
-
-        return response_json[expected_key], raw_response
-    except json.JSONDecodeError:
-        logger.error("Failed to decode JSON response")
-        raise
-    except KeyError as e:
-        logger.error(str(e))
-        raise
-
-
-def gen_code(genner: GennerType, messages: List[Message]) -> Tuple[str, str]:
-    clean_response, json_response = gen_json_response(genner, messages, "code")
-
-    assert isinstance(clean_response, str)
-
-    return clean_response, json_response
-
-
-def gen_list(
-    genner: GennerType, messages: List[TaggedMessage]
-) -> Tuple[List[str], str]:
-    clean_response, json_response = gen_json_response(
-        genner, to_normal_plist(messages), "list"
-    )
-
-    try:
-        assert isinstance(clean_response, list)
-        assert all(isinstance(item, str) for item in clean_response)
-
-        return clean_response, json_response
-    except AssertionError:
-        logger.error("Failed making sure that generated strats are typed `List[str]`")
-        raise
+        return OAIGenner(oai_client, oai_config)
+    else:
+        raise ValueError(f"Unsupported backend: {backend}")
 
 
 def unused_gen_env_code_oai(
