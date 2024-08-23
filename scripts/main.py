@@ -27,7 +27,7 @@ from src.agent import EnvAgent, CommonAgent
 
 load_dotenv()
 
-EA_MAX_ATTEMPTS = 20
+EA_MAX_ATTEMPTS = 5
 EA_MAX_SP_EGC = 2
 CA_MAX_ATTEMPTS = 3
 
