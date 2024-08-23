@@ -20,6 +20,7 @@ from src.helper import (
     dict_representer,
     format_ch,
     format_tch,
+    format_tch_tags,
     process_old_tch,
     represent_multiline_str,
     to_normal_plist,
@@ -231,7 +232,7 @@ class EnvAgent:
             logger.debug(
                 (
                     f"EA - {count}-th code - {attempt}-th attempt - ",
-                    f"EnvAgent's in loop tagged chat history - \n {format_tch(self.tagged_chat_history)}",
+                    f"EnvAgent's in loop tagged chat history - \n {format_tch_tags(self.tagged_chat_history)}",
                 )
             )
 
@@ -252,7 +253,7 @@ class EnvAgent:
                     f"EA - {count}-th code - {attempt}-th attempt - "
                     f"AST error \n{ast_error}"
                 )
-                logger.debug(f"EA - Code is \n{code}")
+                logger.debug(f"EA - Code is \n{code[:100]}...")
 
                 local_tch.append(
                     (
@@ -275,7 +276,7 @@ class EnvAgent:
                     f"EA - {count}-th code - {attempt}-th attempt - "
                     f"Native `compile` error \n{compiler_error}"
                 )
-                logger.debug(f"EA - Code is \n{code}")
+                logger.debug(f"EA - Code is \n{code[:100]}...")
 
                 local_tch.append(
                     (
@@ -300,7 +301,7 @@ class EnvAgent:
                     f"EA - {count}-th code - {attempt}-th attempt - "
                     f"In container error \n{execution_output}"
                 )
-                logger.debug(f"EA - Code is \n{code}")
+                logger.debug(f"EA - Code is \n{code[:100]}...")
 
                 local_tch.append(
                     (
@@ -321,7 +322,7 @@ class EnvAgent:
                     f"EA - {count}-th code - {attempt}-th attempt - "
                     f"The code doesnt return any output"
                 )
-                logger.debug(f"EA - Code is \n{code}")
+                logger.debug(f"EA - Code is \n{code[:100]}...")
 
                 local_tch.append(
                     (
@@ -386,8 +387,6 @@ class EnvAgent:
         self.sp_env_info_getter_codes.append(code)
 
     def save_data(self, folder: Path | str):
-        import yaml
-
         yaml.add_representer(str, represent_multiline_str)
 
         tch_len = len(self.tagged_chat_history)

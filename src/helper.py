@@ -38,6 +38,16 @@ def to_normal_plist(tagplist: Sequence[TaggedMessage]) -> List[Message]:
 
     return result
 
+def format_tch_tags(tagged_chat_history: List[TaggedMessage]) -> str:
+    to_print = "[\n"
+
+    for _, tag in tagged_chat_history:
+        to_print += f"\t{tag}, \n"
+    
+    to_print += "]"
+
+    return to_print
+
 
 def format_tch(tagged_chat_history: List[TaggedMessage]) -> str:
     """Use this to print tagged chat history, utilizing maximum terminal width dynamically"""
