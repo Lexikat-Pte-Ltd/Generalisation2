@@ -87,7 +87,7 @@ def main(
     logger.info("EA - Updating environment agent's SP EIH state...")
     ea.sp_env_info_history.append(initial_special_env_infos)
 
-    # Intiiate common agent
+    # Initiate common agent
     ca = CommonAgent(
         bs_env_info_history=ea.bs_env_info_history,
         sp_env_info_history=ea.sp_env_info_history,
@@ -97,18 +97,19 @@ def main(
 
     # Generate strats based on the new env infos
     strats, raw_strats = ca.gen_strats(genner)
+
+    if debug:
+        strats = [
+            "Clean up temporary files with commands like `rm -rf /tmp/*`."
+        ]
+        raw_strats = str(strats)
+                
     ca.tagged_chat_history.append(
         (
             {"role": "assistant", "content": f"```python\nlist = {raw_strats}```"},
             "gen_strats",
         )
     )
-
-    # Strat deletion strats :
-    # 1. Regex or using BERT to remove similar strats that had been worked with before
-    # 2. Start from last to beginning
-    # 3. Prompt engineering to tell it to avoid to generate previously generated strats
-    # 4. Soft prompting
 
     # For every strat, we
     # 1. Copy the common agent
