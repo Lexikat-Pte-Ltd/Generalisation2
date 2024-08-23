@@ -17,7 +17,7 @@ from src.container import (
     safe_detect_env,
 )
 from src.data import EnvironmentInfo
-from src.helper import format_tch, scan_json_files_for_strat
+from src.helper import format_tch, format_tch_tags, scan_json_files_for_strat
 from src.prep import (
     get_code_regen_plist,
     get_strat_code_req_plist,
@@ -160,7 +160,7 @@ def main(
             logger.debug(
                 (
                     f"CA - {i}-th code - {attempt}-th attempt - ",
-                    f"CommonAgent's in loop tagged chat history - \n{format_tch(copy_ca.tagged_chat_history)}",
+                    f"CommonAgent's in loop chat history tag - \n{format_tch_tags(copy_ca.tagged_chat_history)}",
                 )
             )
 
@@ -172,7 +172,7 @@ def main(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"AST error \n{ast_error}"
                 )
-                logger.debug(f"CA - Code is \n{code}")
+                logger.debug(f"CA - Code is \n{code[:100]}...")
 
                 copy_ca.tagged_chat_history.append(
                     (
@@ -192,13 +192,12 @@ def main(
                 continue
 
             compile_valid, compiler_error = is_valid_code_compiler(code)
-
             if not compile_valid:
                 logger.error(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"Native `compile` error \n{compiler_error}"
                 )
-                logger.debug(f"CA - Code is \n{code}")
+                logger.debug(f"CA - Code is \n{code[:100]}...")
 
                 copy_ca.tagged_chat_history.append(
                     (
@@ -225,7 +224,7 @@ def main(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"In container error \n{execution_output}"
                 )
-                logger.debug(f"CA - Code is \n{code}")
+                logger.debug(f"CA - Code is \n{code[:100]}...")
 
                 copy_ca.tagged_chat_history.append(
                     (
@@ -249,7 +248,7 @@ def main(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"The code doesnt return any output"
                 )
-                logger.debug(f"CA - Code is \n{code}")
+                logger.debug(f"CA - Code is \n{code[:100]}...")
 
                 copy_ca.tagged_chat_history.append(
                     (
@@ -284,7 +283,7 @@ def main(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"No spaces are freed \n{execution_output}"
                 )
-                logger.debug(f"CA - Code is \n{code}")
+                logger.debug(f"CA - Code is \n{code[:100]}...")
 
                 copy_ca.tagged_chat_history.append(
                     (
@@ -314,7 +313,7 @@ def main(
                 )
             )
 
-        logger.debug(f"CA - {i}-th strat - Code is \n{code}")
+        logger.debug(f"CA - {i}-th strat - Code is \n{code[:100]}...")
 
         copy_ca.save_data(
             space_freed=space_freed,
