@@ -70,7 +70,7 @@ class DeepseekGenner(Genner):
             bos_token=self.config.bos_token,
         )
 
-        logger.debug(f"Raw prompt - \n {prompt}")
+        logger.debug(f"Raw prompt - {prompt}")
 
         payload = {
             "model": self.config.model,

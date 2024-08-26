@@ -159,8 +159,8 @@ def main(
         while attempt < CA_MAX_ATTEMPTS:
             logger.debug(
                 (
-                    f"CA - {i}-th code - {attempt}-th attempt - ",
-                    f"CommonAgent's in loop chat history tag - \n{format_tch_tags(copy_ca.tagged_chat_history)}",
+                    f"CA - {i}-th code - {attempt}-th attempt - "
+                    f"CommonAgent's in loop chat history tag - \n{format_tch_tags(copy_ca.tagged_chat_history)}"
                 )
             )
 

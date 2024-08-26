@@ -231,8 +231,8 @@ class EnvAgent:
         for attempt in range(max_attempts):
             logger.debug(
                 (
-                    f"EA - {count}-th code - {attempt}-th attempt - ",
-                    f"EnvAgent's in loop tagged chat history - \n {format_tch_tags(self.tagged_chat_history)}",
+                    f"EA - {count}-th code - {attempt}-th attempt - "
+                    f"EnvAgent's in loop tagged chat history - \n {format_tch_tags(self.tagged_chat_history)}"
                 )
             )
 
