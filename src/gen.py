@@ -105,8 +105,7 @@ class DeepseekGenner(Genner):
 
                 processed_code = self._extract_code(raw_response)
                 processed_code = (
-                    processed_code
-                    .replace(self.config.bos_token, "")
+                    processed_code.replace(self.config.bos_token, "")
                     .replace(self.config.bos_token_2, "")
                     .replace(self.config.eos_token, "")
                     .replace(self.config.eos_token_2, "")
@@ -159,7 +158,7 @@ class OAIGenner(Genner):
         try:
             response = self.client.chat.completions.create(
                 model=self.config.model,
-                response_format={"type": "json_object"},
+                # response_format={"type": "json_object"},
                 messages=cast(Any, messages),
                 max_tokens=self.config.max_tokens,
                 temperature=self.config.temperature,
@@ -171,26 +170,55 @@ class OAIGenner(Genner):
             raise
 
     def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
-        raw_response = self.generate(messages)
-        response_json = json.loads(raw_response)
-        processed_code = response_json.get("code", "")
+        while True:
+            try:
+                raw_response = self.generate(messages)
 
-        return processed_code, raw_response
+                processed_code = self._extract_code(raw_response)
+
+                logger.info(f"Processed code - \n{processed_code}")
+
+                return processed_code, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating code occured: {e}")
+                logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_code(response: str) -> str:
+        # Extract code from the response
+        regex_pattern = r"```python\n([\s\S]*?)```"
+        code_match = re.search(regex_pattern, response, re.DOTALL)
+        assert code_match is not None
+
+        code_string = code_match.group(1)
+        assert code_string is not None
+
+        return code_string
 
     def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
-        raw_response = self.generate(to_normal_plist(messages))
-        response_json = json.loads(raw_response)
-        list_response = response_json.get("list", [])
+        while True:
+            try:
+                raw_response = self.generate(to_normal_plist(messages))
+                processed_list = self._extract_list(raw_response)
 
-        if isinstance(list_response, str):
-            processed_list = json.loads(list_response)
-        else:
-            processed_list = list_response
+                return processed_list, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating list occured: {e}")
+                logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_list(response: str) -> List[str]:
+        start = response.index("[")
+        end = response.rindex("]") + 1
+        list_string = response[start:end]
+
+        # Parse the string to a Python list
+        processed_list = ast.literal_eval(list_string)
 
         assert isinstance(processed_list, list)
         assert all(isinstance(item, str) for item in processed_list)
 
-        return processed_list, raw_response
+        return processed_list
 
 
 def get_genner(
