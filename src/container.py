@@ -1,4 +1,6 @@
 from pathlib import Path
+import shlex
+import tempfile
 from typing import List, Tuple, cast
 
 import docker.errors
@@ -31,7 +33,6 @@ def safe_container_get(client: DockerClient, container_identifier: str) -> Conta
         raise ValueError("Retrieved object is not a Container")
 
     return container
-
 
 
 def safe_folderlist_bfs(
@@ -131,24 +132,54 @@ def safe_detect_env(client: DockerClient, container_id: str) -> EnvironmentInfo:
 
 def run_code_in_con(
     client: DockerClient, container_id: str, escaped_code: str
-) -> Tuple[int, str]:
+) -> Tuple[int, str, str]:
     container = safe_container_get(client, container_id)
-    
-    # Use python -u for unbuffered output
-    # Redirect stderr to stdout to capture all output
-    # Use exec to run in the current environment
-    command = [
-        'python', '-u', '-c',
-        f'import sys; exec({escaped_code!r})',
-        '2>&1'
-    ]
-    
-    result = cast(Tuple[int, bytes], container.exec_run(
-        cmd=command,
-        demux=False,  # Combine stdout and stderr
-        stream=False  # Wait for the command to finish and return all output at once
-    ))
-    
-    exit_code, output = result
-    return exit_code, output.decode('utf-8', errors='replace')
 
+    temp_file = f"/temp_script_{tempfile.NamedTemporaryFile().name.split('/')[-1]}.py"
+
+    try:
+        # Escape the code for shell
+        escaped_shell_code = shlex.quote(escaped_code)
+
+        # Use echo instead of heredoc
+        write_command = f"echo {escaped_shell_code} > {temp_file}"
+        write_result = container.exec_run(cmd=["/bin/sh", "-c", write_command])
+
+        if write_result.exit_code != 0:
+            raise Exception(
+                write_result.exit_code,
+                f"Failed to create file: {write_result.output.decode('utf-8')}",
+            )
+
+        verify_command = (
+            f"test -f {temp_file} && echo 'File exists' || echo 'File does not exist'"
+        )
+        verify_result = container.exec_run(cmd=["/bin/sh", "-c", verify_command])
+
+        if b"File exists" not in verify_result.output:
+            raise Exception(
+                1, f"File verification failed: {verify_result.output.decode('utf-8')}"
+            )
+
+        command = ["python", "-u", temp_file, "2>&1"]
+
+        result = cast(
+            Tuple[int, bytes],
+            container.exec_run(
+                cmd=command,
+                demux=False,  # Combine stdout and stderr
+                stream=False,  # Wait for the command to finish and return all output at once
+            ),
+        )
+
+        exit_code, output = result
+
+        # Read the contents of the temporary file
+        cat_command = f"cat {temp_file}"
+        cat_result = container.exec_run(cmd=["/bin/sh", "-c", cat_command])
+        file_contents = cat_result.output.decode("utf-8", errors="replace")
+
+        return exit_code, output.decode("utf-8", errors="replace"), file_contents
+    finally:
+        container.exec_run(cmd=["/bin/sh", "-c", f"rm -f {temp_file}"])
+        pass

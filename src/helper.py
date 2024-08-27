@@ -1,3 +1,4 @@
+import difflib
 import json
 import re
 import shutil
@@ -38,12 +39,13 @@ def to_normal_plist(tagplist: Sequence[TaggedMessage]) -> List[Message]:
 
     return result
 
+
 def format_tch_tags(tagged_chat_history: List[TaggedMessage]) -> str:
     to_print = "[\n"
 
     for _, tag in tagged_chat_history:
         to_print += f"\t{tag}, \n"
-    
+
     to_print += "]"
 
     return to_print
@@ -206,3 +208,22 @@ def represent_multiline_str(dumper: yaml.Dumper, data: str) -> yaml.nodes.Scalar
     if len(data.splitlines()) > 1:  # check for multiline string
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+def get_code_diff(old_code: str, new_code: str) -> List[str]:
+    differ = difflib.SequenceMatcher(None, old_code, new_code)
+    changes = []
+
+    for opcode, old_start, old_end, new_start, new_end in differ.get_opcodes():
+        if opcode != "equal":
+            old_substr = old_code[old_start:old_end]
+            new_substr = new_code[new_start:new_end]
+
+            if opcode == "replace":
+                changes.append(f"Changed '{old_substr}' to '{new_substr}'")
+            elif opcode == "delete":
+                changes.append(f"Deleted '{old_substr}'")
+            elif opcode == "insert":
+                changes.append(f"Inserted '{new_substr}'")
+
+    return changes

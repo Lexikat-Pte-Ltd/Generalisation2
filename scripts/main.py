@@ -1,10 +1,8 @@
 from argparse import ArgumentParser
 from copy import deepcopy
-from datetime import datetime
 import os
 from pathlib import Path
 import sys
-from typing import List, Literal, cast, get_args
 
 import docker
 from dotenv import load_dotenv
@@ -17,7 +15,7 @@ from src.container import (
     safe_detect_env,
 )
 from src.data import EnvironmentInfo
-from src.helper import format_tch, format_tch_tags, scan_json_files_for_strat
+from src.helper import format_tch_tags, get_code_diff, scan_json_files_for_strat
 from src.prep import (
     get_code_regen_plist,
     get_strat_code_req_plist,
@@ -99,11 +97,9 @@ def main(
     strats, raw_strats = ca.gen_strats(genner)
 
     if debug:
-        strats = [
-            "Clean up temporary files with commands like `rm -rf /tmp/*`."
-        ]
+        strats = ["Clean up temporary files with commands like `rm -rf /tmp/*`."]
         raw_strats = str(strats)
-                
+
     ca.tagged_chat_history.append(
         (
             {"role": "assistant", "content": f"```python\nlist = {raw_strats}```"},
@@ -216,15 +212,25 @@ def main(
                 attempt += 1
                 continue
 
-            exit_code, execution_output = run_code_in_con(
+            exit_code, execution_output, reflected_code = run_code_in_con(
                 docker_client, test_container_id, code
             )
+
             if exit_code != 0:
                 logger.error(
                     f"CA - {i}-th strat - {attempt + 1}-th attempt - "
                     f"In container error \n{execution_output}"
                 )
                 logger.debug(f"CA - Code is \n{code[:100]}...")
+                logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
+
+                code_diffs = get_code_diff(code, reflected_code)
+
+                if len(code_diffs) > 0:
+                    logger.warning("CA - Generated code and in container are different")
+
+                    for diff in code_diffs:
+                        logger.warning(f"CA - {diff}")
 
                 copy_ca.tagged_chat_history.append(
                     (
@@ -269,7 +275,7 @@ def main(
 
             # The code is compile-able and can be executed in test container
             # Time to test it on real container
-            exit_code, execution_output = run_code_in_con(
+            exit_code, execution_output, reflected_code = run_code_in_con(
                 docker_client, main_container_id, code
             )
 
@@ -284,6 +290,18 @@ def main(
                     f"No spaces are freed \n{execution_output}"
                 )
                 logger.debug(f"CA - Code is \n{code[:100]}...")
+                logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
+
+                code_diffs = get_code_diff(code, reflected_code)
+
+                if len(code_diffs) > 0:
+                    logger.info("CA - Generated code and in container are different.")
+
+                    for diff in code_diffs:
+                        logger.info(f"CA - {diff}")
+                else:
+                    logger.info("CA - No diffs between generated code and in container code.")
+
 
                 copy_ca.tagged_chat_history.append(
                     (
