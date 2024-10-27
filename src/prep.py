@@ -22,36 +22,36 @@ SYSTEM_PLIST_TAG = "system_plist"
 
 
 def get_system_plist(
-    in_con_path: str | Path,
-    tag=SYSTEM_PLIST_TAG,
+  in_con_path: str | Path,
+  tag=SYSTEM_PLIST_TAG,
 ) -> List[TaggedMessage]:
-    """(System, Env, Basic)
+  """(System, Env, Basic)
 
-    Get system prompt plist (single) that precedes all other tagged chat history.
+  Get system prompt plist (single) that precedes all other tagged chat history.
 
-    ```
-    On EnvAgent and BasicAgent :
-    [
-        > ({"role": "system", "content": "..."}, "system"),
-        ...,
-        ...,
-    ]
-    ```
+  ```
+  On EnvAgent and BasicAgent :
+  [
+      > ({"role": "system", "content": "..."}, "system"),
+      ...,
+      ...,
+  ]
+  ```
 
-    Args:
-        in_con_path (str): In container path.
-        tag (str, optional): Tag to identify the only message in plist.
+  Args:
+      in_con_path (str): In container path.
+      tag (str, optional): Tag to identify the only message in plist.
 
-    Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
-    """
-    system_prompt = SYSTEM_TEMPLATE.format(
-        in_con_path=str(in_con_path),  #
-    )
+  Returns:
+      List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+  """
+  system_prompt = SYSTEM_TEMPLATE.format(
+    in_con_path=str(in_con_path),  #
+  )
 
-    return [
-        ({"role": "system", "content": system_prompt}, tag),
-    ]
+  return [
+    ({"role": "system", "content": system_prompt}, tag),
+  ]
 
 
 PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE = """
@@ -71,49 +71,47 @@ BASIC_ENV_PLIST_TAG = "get_basic_env_plist"
 
 
 def get_basic_env_plist(
-    bs_eih: List[EnvironmentInfo],
-    tag=BASIC_ENV_PLIST_TAG,
-    max_count=5,
+  bs_eih: List[EnvironmentInfo],
+  tag=BASIC_ENV_PLIST_TAG,
+  max_count=5,
 ) -> List[TaggedMessage]:
-    """(User, EnvAgent, CommonAgent, ContextProvider)
+  """(User, EnvAgent, CommonAgent, ContextProvider)
 
-    Get basic env plist for basic environment inclusion.
+  Get basic env plist for basic environment inclusion.
 
-    ```
-    On EnvAgent :
-    [
-        ({"role": "system", "content": "..."}, "get_system_plist"),
-        > ({"role": "user", "content": "..."}, "get_basic_env_plist"),
-        ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        ...,
-    ]
-    ```
+  ```
+  On EnvAgent :
+  [
+      ({"role": "system", "content": "..."}, "get_system_plist"),
+      > ({"role": "user", "content": "..."}, "get_basic_env_plist"),
+      ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      ...,
+  ]
+  ```
 
-    Args:
-        bs_eih (str): Initial or basic environment info history.
-        tag (str, optional): Tag to identify the only message in plist.
+  Args:
+      bs_eih (str): Initial or basic environment info history.
+      tag (str, optional): Tag to identify the only message in plist.
 
-    Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
-    """
-    assert len(bs_eih) > 0
+  Returns:
+      List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+  """
+  assert len(bs_eih) > 0
 
-    inner_env_infos = []
+  inner_env_infos = []
 
-    for env_info in bs_eih:
-        inner_env_infos.append(
-            SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-                basic_env_info=str(env_info)
-            )
-        )
-
-    outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
-        basic_env_infos="".join(inner_env_infos[-max_count:])
+  for env_info in bs_eih:
+    inner_env_infos.append(
+      SINGULAR_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(basic_env_info=str(env_info))
     )
 
-    return [
-        ({"role": "user", "content": outer_env_infos}, tag),
-    ]
+  outer_env_infos = PLURAL_BASIC_ENV_INFO_INCLUSION_TEMPLATE.format(
+    basic_env_infos="".join(inner_env_infos[-max_count:])
+  )
+
+  return [
+    ({"role": "user", "content": outer_env_infos}, tag),
+  ]
 
 
 PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE = """
@@ -134,75 +132,75 @@ SPECIAL_ENV_PLIST_TAG = "get_special_env_plist"
 
 # Used by basic agent
 def get_special_env_plist(
-    sp_eih: List[List[str]],
-    tag: str = SPECIAL_ENV_PLIST_TAG,
-    max_count: int = 10,
+  sp_eih: List[List[str]],
+  tag: str = SPECIAL_ENV_PLIST_TAG,
+  max_count: int = 10,
 ) -> List[TaggedMessage]:
-    """(User, EnvAgent, CommonAgent, ContextProvider)
+  """(User, EnvAgent, CommonAgent, ContextProvider)
 
-    Generate a special environment plist that precedes the generation of a special environment.
+  Generate a special environment plist that precedes the generation of a special environment.
 
-    ```
-    On EnvAgent (After a special env is available):
-    [
-        ...,
-        ({"role": "user", "content": "..."}, "get_basic_env_plist"),
-        > ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        ({"role": "user", "content": "..."}, "get_special_env_code_getter_gen_plist"),
-        ...,
-    ]
+  ```
+  On EnvAgent (After a special env is available):
+  [
+      ...,
+      ({"role": "user", "content": "..."}, "get_basic_env_plist"),
+      > ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      ({"role": "user", "content": "..."}, "get_special_env_code_getter_gen_plist"),
+      ...,
+  ]
 
-    On CommonAgent :
-    [
-        ...,
-        ({"role": "user", "content": "..."}, "get_basic_env_plist"),
-        > ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        ({"role": "user", "content": "..."}, "get_strat_gen_plist"),
-        ...,
-        ({"role": "user", "content": "..."}, "get_basic_env_plist"),
-        > ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        ({"role": "user", "content": "..."}, "get_strat_code_gen_plist"),
-        ...,
-    ]
-    ```
+  On CommonAgent :
+  [
+      ...,
+      ({"role": "user", "content": "..."}, "get_basic_env_plist"),
+      > ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      ({"role": "user", "content": "..."}, "get_strat_gen_plist"),
+      ...,
+      ({"role": "user", "content": "..."}, "get_basic_env_plist"),
+      > ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      ({"role": "user", "content": "..."}, "get_strat_code_gen_plist"),
+      ...,
+  ]
+  ```
 
 
-    Args:
-        sp_eih (List[List[str]]): A list of special environment information history. Each sublist contains
-            information about special environment infos at a point of time.
-        tag (str, optional): The tag to identify the only message in the plist. Defaults to
-            SPECIAL_ENV_PLIST_TAG.
-        max_count (int, optional): The maximum number of special environment information sets to
-            include in the plist. Defaults to 10.
+  Args:
+      sp_eih (List[List[str]]): A list of special environment information history. Each sublist contains
+          information about special environment infos at a point of time.
+      tag (str, optional): The tag to identify the only message in the plist. Defaults to
+          SPECIAL_ENV_PLIST_TAG.
+      max_count (int, optional): The maximum number of special environment information sets to
+          include in the plist. Defaults to 10.
 
-    Returns:
-        List[TaggedMessage]: A list containing a single tagged message. The message is a dictionary
-            with a "role" of "user" and a "content" that is the formatted string of special
-            environment information. The tag for this message is provided as an argument to the
-            function.
-    """
-    assert len(sp_eih) > 0, "sp_eih must not be empty"
-    flat_sp_eih = [item for history in sp_eih for item in history]
+  Returns:
+      List[TaggedMessage]: A list containing a single tagged message. The message is a dictionary
+          with a "role" of "user" and a "content" that is the formatted string of special
+          environment information. The tag for this message is provided as an argument to the
+          function.
+  """
+  assert len(sp_eih) > 0, "sp_eih must not be empty"
+  flat_sp_eih = [item for history in sp_eih for item in history]
 
-    # If there is more than one point of time at the history, then format each time of the history
-    # each set and combine them into a single string.
-    inner_env_infos = []
+  # If there is more than one point of time at the history, then format each time of the history
+  # each set and combine them into a single string.
+  inner_env_infos = []
 
-    for sp_ei in flat_sp_eih[-max_count:]:
-        inner_env_infos.append(
-            SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
-                special_env_info=sp_ei.strip()
-            )
-        )
-
-    outer_env_infos = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
-        special_env_infos="\n".join(inner_env_infos).strip()
+  for sp_ei in flat_sp_eih[-max_count:]:
+    inner_env_infos.append(
+      SINGULAR_SPECIAL_ENV_INFO_INCLUSION_TEMPLATE.format(
+        special_env_info=sp_ei.strip()
+      )
     )
 
-    # Return a list containing a single tagged message.
-    return [
-        ({"role": "user", "content": outer_env_infos}, tag),
-    ]
+  outer_env_infos = PLURAL_SPECIAL_ENV_INFOS_INCLUSION_TEMPLATE.format(
+    special_env_infos="\n".join(inner_env_infos).strip()
+  )
+
+  # Return a list containing a single tagged message.
+  return [
+    ({"role": "user", "content": outer_env_infos}, tag),
+  ]
 
 
 STRAT_REQ_TEMPLATE = """
@@ -226,50 +224,50 @@ STRAT_REQ_PLIST_TAG = "get_strat_req_plist"
 
 
 def get_strat_req_plist(
-    in_con_path: str | Path,
-    prev_strats: List[str],
-    tag=STRAT_REQ_PLIST_TAG,
+  in_con_path: str | Path,
+  prev_strats: List[str],
+  tag=STRAT_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
-    """(User, CommonAgent, GenerationRequest, JsonListOutput)
+  """(User, CommonAgent, GenerationRequest, JsonListOutput)
 
-    Get strat gen plist for strat generation.
+  Get strat gen plist for strat generation.
 
-    ```
-    On CommonAgent :
-    [
-        ...,
-        ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        > ({"role": "user", "content": "..."}, "get_strat_gen_plist"),
-        ({"role": "assistant", "content": "..."}, "gen_list"),
-        ...,
-    ]
-    ```
+  ```
+  On CommonAgent :
+  [
+      ...,
+      ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      > ({"role": "user", "content": "..."}, "get_strat_gen_plist"),
+      ({"role": "assistant", "content": "..."}, "gen_list"),
+      ...,
+  ]
+  ```
 
-    Args:
-        special_env_info (str): Special env info from docker execution.
-        strat_template (str, optional): Prompt template.
-        tag (str, optional): Tag to identify the only message in plist.
+  Args:
+      special_env_info (str): Special env info from docker execution.
+      strat_template (str, optional): Prompt template.
+      tag (str, optional): Tag to identify the only message in plist.
 
-    Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
-    """
-    if prev_strats:
-        formatted_prev_strats = (
-            "<PrevStrats>\n"
-            + "\n".join(f"- {strat}" for strat in prev_strats)
-            + "\n</PrevStrats>\n"
-        )
-    else:
-        formatted_prev_strats = ""
-
-    strat_prompt = STRAT_REQ_TEMPLATE.format(
-        in_con_path=str(in_con_path),  #
-        prev_strats=formatted_prev_strats,
+  Returns:
+      List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+  """
+  if prev_strats:
+    formatted_prev_strats = (
+      "<PrevStrats>\n"
+      + "\n".join(f"- {strat}" for strat in prev_strats)
+      + "\n</PrevStrats>\n"
     )
+  else:
+    formatted_prev_strats = ""
 
-    return [
-        ({"role": "user", "content": strat_prompt}, tag),
-    ]
+  strat_prompt = STRAT_REQ_TEMPLATE.format(
+    in_con_path=str(in_con_path),  #
+    prev_strats=formatted_prev_strats,
+  )
+
+  return [
+    ({"role": "user", "content": strat_prompt}, tag),
+  ]
 
 
 SPECIAL_EGC_REQ_TEMPLATE = """
@@ -298,39 +296,39 @@ SPECIAL_EGC_REQ_PLIST_TAG = "get_special_egc_req_plist"
 
 # Used by env agent
 def get_special_egc_req_plist(
-    in_con_path: str | Path,
-    tag=SPECIAL_EGC_REQ_PLIST_TAG,
+  in_con_path: str | Path,
+  tag=SPECIAL_EGC_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
-    """(User, EnvAgent, GenerationRequest, JsonCodeOutput)
+  """(User, EnvAgent, GenerationRequest, JsonCodeOutput)
 
-    Get a plist for special EGC (Environment Getter Code) generation request.
+  Get a plist for special EGC (Environment Getter Code) generation request.
 
-    ```
-    On EnvAgent :
-    [
-        ...,
-        ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        ({"role": "user", "content": "..."}, "get_special_env_code_getter_gen_plist"),
-        ({"role": "assistant", "content": "..."}, "gen_code"),
-        ...,
-    ]
-    ```
+  ```
+  On EnvAgent :
+  [
+      ...,
+      ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      ({"role": "user", "content": "..."}, "get_special_env_code_getter_gen_plist"),
+      ({"role": "assistant", "content": "..."}, "gen_code"),
+      ...,
+  ]
+  ```
 
-    Args:
-        in_con_path (str | Path): In container path.
-        template (str, optional): Prompt template.
-        tag (str, optional): Tag to identify the only message in plist.
+  Args:
+      in_con_path (str | Path): In container path.
+      template (str, optional): Prompt template.
+      tag (str, optional): Tag to identify the only message in plist.
 
-    Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
-    """
-    special_env_code_getter_prompt = SPECIAL_EGC_REQ_TEMPLATE.format(
-        in_con_path=in_con_path
-    )
+  Returns:
+      List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+  """
+  special_env_code_getter_prompt = SPECIAL_EGC_REQ_TEMPLATE.format(
+    in_con_path=in_con_path
+  )
 
-    return [
-        ({"role": "user", "content": special_env_code_getter_prompt}, tag),
-    ]
+  return [
+    ({"role": "user", "content": special_env_code_getter_prompt}, tag),
+  ]
 
 
 STRAT_CODE_REQ_TEMPLATE = """
@@ -358,39 +356,39 @@ STRAT_CODE_REQ_TAG = "get_strat_code_req_plist"
 
 # Used by basic agent
 def get_strat_code_req_plist(
-    strat: str,
-    tag=STRAT_CODE_REQ_TAG,
+  strat: str,
+  tag=STRAT_CODE_REQ_TAG,
 ) -> List[TaggedMessage]:
-    """(User, CommonAgent, GenerationRequest, CodeOutput)
+  """(User, CommonAgent, GenerationRequest, CodeOutput)
 
-    Get a plist for strat code generation.
+  Get a plist for strat code generation.
 
-    ```
-    On EnvAgent :
-    [
-        ...,
-        ({"role": "user", "content": "..."}, "get_special_env_plist"),
-        > ({"role": "user", "content": "..."}, "get_strat_code_gen_plist"),
-        ({"role": "assistant", "content": "..."}, "gen_code"),
-        ...,
-    ]
-    ```
+  ```
+  On EnvAgent :
+  [
+      ...,
+      ({"role": "user", "content": "..."}, "get_special_env_plist"),
+      > ({"role": "user", "content": "..."}, "get_strat_code_gen_plist"),
+      ({"role": "assistant", "content": "..."}, "gen_code"),
+      ...,
+  ]
+  ```
 
-    Args:
-        in_con_path (str | Path): In container path.
-        template (str, optional): Prompt template.
-        tag (str, optional): Tag to identify the only message in plist.
+  Args:
+      in_con_path (str | Path): In container path.
+      template (str, optional): Prompt template.
+      tag (str, optional): Tag to identify the only message in plist.
 
-    Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
-    """
-    code_prompt = STRAT_CODE_REQ_TEMPLATE.format(
-        strat=strat  #
-    )
+  Returns:
+      List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+  """
+  code_prompt = STRAT_CODE_REQ_TEMPLATE.format(
+    strat=strat  #
+  )
 
-    return [
-        ({"role": "user", "content": code_prompt}, tag),
-    ]
+  return [
+    ({"role": "user", "content": code_prompt}, tag),
+  ]
 
 
 REGEN_TEMPLATE = """
@@ -422,47 +420,47 @@ USER_CODE_REGEN_TAG = "get_code_regen_plist"
 
 # Used by basic and env agent
 def get_code_regen_plist(
-    task_description: str,
-    error_context: str,
-    run_context: str,
-    user_tag=USER_CODE_REGEN_TAG,
+  task_description: str,
+  error_context: str,
+  run_context: str,
+  user_tag=USER_CODE_REGEN_TAG,
 ) -> List[TaggedMessage]:
-    """(User, CommonAgent, EnvAgent, GenerationRequest, CodeOutput)
+  """(User, CommonAgent, EnvAgent, GenerationRequest, CodeOutput)
 
-    Get a plist for code regeneration.
+  Get a plist for code regeneration.
 
-    ```
-    On CommonAgent and CommonAgent :
-    [
-        ...,
-        ({"role": "user", "content": "..."}, "*REQ*"),
-        > ({"role": "assistant", "content": "..."}, ASSISTANT_REGEN_TAG),
-        > ({"role": "user", "content": "..."}, USER_REGEN_TAG),
-        ({"role": "assistant", "content": "..."}, "gen_code"),
-        ...,
-    ]
-    ```
+  ```
+  On CommonAgent and CommonAgent :
+  [
+      ...,
+      ({"role": "user", "content": "..."}, "*REQ*"),
+      > ({"role": "assistant", "content": "..."}, ASSISTANT_REGEN_TAG),
+      > ({"role": "user", "content": "..."}, USER_REGEN_TAG),
+      ({"role": "assistant", "content": "..."}, "gen_code"),
+      ...,
+  ]
+  ```
 
-    Args:
-        task_description (str): Task/strat context for regen.
-        asssitant_raw_response (str): Previously generated response by assistant.
-        error_context (str): Error generated by previous code.
-        run_context (str): Execution context of previous code
-        user_tag (str, optional): Tag to identify the regen request in plist.
-        assi_tag (str, optional): Tag to identify assistant's failed code in plist.
+  Args:
+      task_description (str): Task/strat context for regen.
+      asssitant_raw_response (str): Previously generated response by assistant.
+      error_context (str): Error generated by previous code.
+      run_context (str): Execution context of previous code
+      user_tag (str, optional): Tag to identify the regen request in plist.
+      assi_tag (str, optional): Tag to identify assistant's failed code in plist.
 
-    Returns:
-        List[TaggedMessage]: TaggedMessages to append to caller's chat history.
-    """
-    regen_prompts = REGEN_TEMPLATE.format(
-        task_description=task_description,
-        error_context=error_context,
-        run_context=run_context,
-    )
+  Returns:
+      List[TaggedMessage]: TaggedMessages to append to caller's chat history.
+  """
+  regen_prompts = REGEN_TEMPLATE.format(
+    task_description=task_description,
+    error_context=error_context,
+    run_context=run_context,
+  )
 
-    return [
-        ({"role": "user", "content": regen_prompts}, user_tag),
-    ]
+  return [
+    ({"role": "user", "content": regen_prompts}, user_tag),
+  ]
 
 
 # IMPROVE_TEMPLATE = """

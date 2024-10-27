@@ -144,6 +144,7 @@ def run_code_in_con(
         # Use echo instead of heredoc
         write_command = f"echo {escaped_shell_code} > {temp_file}"
         write_result = container.exec_run(cmd=["/bin/sh", "-c", write_command])
+        logger.info(f"Writing into file {temp_file}")
 
         if write_result.exit_code != 0:
             raise Exception(
@@ -181,5 +182,5 @@ def run_code_in_con(
 
         return exit_code, output.decode("utf-8", errors="replace"), file_contents
     finally:
-        container.exec_run(cmd=["/bin/sh", "-c", f"rm -f {temp_file}"])
+        # container.exec_run(cmd=["/bin/sh", "-c", f"rm -f {temp_file}"])
         pass

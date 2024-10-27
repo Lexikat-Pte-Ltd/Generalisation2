@@ -8,9 +8,10 @@ import requests
 from jinja2 import Template
 from loguru import logger
 from openai import OpenAI
-from unidecode import unidecode
+from anthropic import Anthropic
 
-from src.config import DeepseekConfig, OAIConfig
+
+from src.config import DeepseekConfig, OAIConfig, WizardCoderConfig, ClaudeConfig
 from src.helper import to_normal_plist
 from src.types import Message, TaggedMessage
 
@@ -37,10 +38,9 @@ DEEPSEEK_TEMPLATE = """{%- set ns = namespace(found=false, last_role=None) -%}
     {%- set ns.last_role = message['role'] %}
 {%- endfor %}
 ### Response:
-{% if force_python %}
-```python
-{% endif %}
 """.strip()
+
+WIZARDCODER_TEMPLATE = DEEPSEEK_TEMPLATE
 
 
 class Genner(ABC):
@@ -61,16 +61,12 @@ class DeepseekGenner(Genner):
     def __init__(self, config: DeepseekConfig):
         self.config = config
 
-    def generate(self, messages: List[Message], force_python=False) -> str:
+    def generate(self, messages: List[Message]) -> str:
         template = Template(DEEPSEEK_TEMPLATE)
         prompt = template.render(
             messages=messages,
-            force_python=force_python,
             add_generation_prompt=self.config.add_generation_prompt,
-            bos_token=self.config.bos_token,
         )
-
-        logger.debug(f"Raw prompt - {prompt}")
 
         payload = {
             "model": self.config.model,
@@ -86,22 +82,10 @@ class DeepseekGenner(Genner):
             logger.error(f"API request failed: {str(e)}")
             raise
 
-    @staticmethod
-    def _extract_code(response: str) -> str:
-        # Extract code from the response
-        regex_pattern = r"```python\n([\s\S]*?)```"
-        code_match = re.search(regex_pattern, response, re.DOTALL)
-        assert code_match is not None
-
-        code_string = code_match.group(1)
-        assert code_string is not None
-
-        return code_string
-
     def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
         while True:
             try:
-                raw_response = self.generate(messages, force_python=False)
+                raw_response = self.generate(messages)
 
                 processed_code = self._extract_code(raw_response)
                 processed_code = (
@@ -122,6 +106,30 @@ class DeepseekGenner(Genner):
                 logger.error(f"An error while generating code occured: {e}")
                 logger.error("Retrying...")
 
+    def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
+        # Deepseek-specific list generation logic
+        while True:
+            try:
+                raw_response = self.generate(to_normal_plist(messages))
+                processed_list = self._extract_list(raw_response)
+
+                return processed_list, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating list occured: {e}")
+                logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_code(response: str) -> str:
+        # Extract code from the response
+        regex_pattern = r"```python\n([\s\S]*?)```"
+        code_match = re.search(regex_pattern, response, re.DOTALL)
+        assert code_match is not None
+
+        code_string = code_match.group(1)
+        assert code_string is not None
+
+        return code_string
+
     @staticmethod
     def _extract_list(response: str) -> List[str]:
         start = response.index("[")
@@ -136,6 +144,46 @@ class DeepseekGenner(Genner):
 
         return processed_list
 
+
+class WizardCoderGenner(Genner):
+    def __init__(self, config: WizardCoderConfig):
+        self.config = config
+
+    def generate(self, messages: List[Message]) -> str:
+        template = Template(WIZARDCODER_TEMPLATE)
+        prompt = template.render(
+            messages=messages,
+            add_generation_prompt=self.config.add_generation_prompt,
+        )
+
+        payload = {
+            "model": self.config.model,
+            "prompt": prompt,
+            "stream": self.config.stream,
+        }
+
+        try:
+            response = requests.post(self.config.endpoint, json=payload)
+            response.raise_for_status()
+            return response.json()["response"]
+        except requests.RequestException as e:
+            logger.error(f"API request failed: {str(e)}")
+            raise
+
+    def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
+        while True:
+            try:
+                raw_response = self.generate(messages)
+
+                processed_code = self._extract_code(raw_response)
+
+                logger.info(f"Processed code - \n{processed_code}")
+
+                return processed_code, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating code occured: {e}")
+                logger.error("Retrying...")
+
     def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
         # Deepseek-specific list generation logic
         while True:
@@ -147,6 +195,32 @@ class DeepseekGenner(Genner):
             except Exception as e:
                 logger.error(f"An error while generating list occured: {e}")
                 logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_code(response: str) -> str:
+        # Extract code from the response
+        regex_pattern = r"```python\n([\s\S]*?)```"
+        code_match = re.search(regex_pattern, response, re.DOTALL)
+        assert code_match is not None
+
+        code_string = code_match.group(1)
+        assert code_string is not None
+
+        return code_string
+
+    @staticmethod
+    def _extract_list(response: str) -> List[str]:
+        start = response.index("[")
+        end = response.rindex("]") + 1
+        list_string = response[start:end]
+
+        # Parse the string to a Python list
+        processed_list = ast.literal_eval(list_string)
+
+        assert isinstance(processed_list, list)
+        assert all(isinstance(item, str) for item in processed_list)
+
+        return processed_list
 
 
 class OAIGenner(Genner):
@@ -221,18 +295,89 @@ class OAIGenner(Genner):
         return processed_list
 
 
+class ClaudeGenner(Genner):
+    def __init__(self, client: Anthropic, config: ClaudeConfig):
+        self.client = client
+        self.config = config
+
+    def generate(self, messages: List[Message]) -> str:
+        try:
+            response = self.client.messages.create(
+                model=self.config.model,
+                messages=cast(Any, messages),
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+            )
+            text_response = response.content[0].text  # type: ignore
+            assert isinstance(text_response, str)
+
+            return text_response
+        except Exception as e:
+            logger.error(f"Claude API request failed: {str(e)}")
+            raise
+
+    def generate_code(self, messages: List[Message]) -> Tuple[str, str]:
+        while True:
+            try:
+                raw_response = self.generate(messages)
+                processed_code = self._extract_code(raw_response)
+                logger.info(f"Processed code - \n{processed_code}")
+                return processed_code, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating code occurred: {e}")
+                logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_code(response: str) -> str:
+        regex_pattern = r"```python\n([\s\S]*?)```"
+        code_match = re.search(regex_pattern, response, re.DOTALL)
+        assert code_match is not None
+        code_string = code_match.group(1)
+        assert code_string is not None
+        return code_string
+
+    def generate_list(self, messages: List[TaggedMessage]) -> Tuple[List[str], str]:
+        while True:
+            try:
+                raw_response = self.generate(to_normal_plist(messages))
+                processed_list = self._extract_list(raw_response)
+                return processed_list, raw_response
+            except Exception as e:
+                logger.error(f"An error while generating list occurred: {e}")
+                logger.error("Retrying...")
+
+    @staticmethod
+    def _extract_list(response: str) -> List[str]:
+        start = response.index("[")
+        end = response.rindex("]") + 1
+        list_string = response[start:end]
+        processed_list = ast.literal_eval(list_string)
+        assert isinstance(processed_list, list)
+        assert all(isinstance(item, str) for item in processed_list)
+        return processed_list
+
+
 def get_genner(
-    backend: Literal["deepseek", "oai"],
+    backend: Literal["deepseek", "oai", "wizardcoder", "claude"],
     deepseek_config: DeepseekConfig = DeepseekConfig(),
     oai_config: OAIConfig = OAIConfig(),
+    wizard_config: WizardCoderConfig = WizardCoderConfig(),
+    claude_config: ClaudeConfig = ClaudeConfig(),
     oai_client: OpenAI | None = None,
+    claude_client: Anthropic | None = None,
 ) -> Genner:
     if backend == "deepseek":
         return DeepseekGenner(deepseek_config)
+    elif backend == "wizardcoder":
+        return WizardCoderGenner(wizard_config)
     elif backend == "oai":
         if not oai_client:
             raise ValueError("OpenAI client is required for OAI backend")
         return OAIGenner(oai_client, oai_config)
+    elif backend == "claude":
+        if not claude_client:
+            raise ValueError("Anthropic client is required for Claude backend")
+        return ClaudeGenner(claude_client, claude_config)
     else:
         raise ValueError(f"Unsupported backend: {backend}")
 

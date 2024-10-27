@@ -13,7 +13,13 @@ class DeepseekConfig(NamedTuple):
     eot_token: str = "<|EOT|>"
     eot_token_2: str = "<｜EOT｜>"
     vertical_bar: str = "｜"
-    prefill_response: str = ""
+
+
+class WizardCoderConfig(NamedTuple):
+    endpoint: str = "http://localhost:11434/api/generate"
+    model: str = "wizardcoder:latest"
+    stream: bool = False
+    add_generation_prompt: bool = True
 
 
 class OAIConfig(NamedTuple):
@@ -21,3 +27,11 @@ class OAIConfig(NamedTuple):
     max_tokens: int = 500
     response_format: Dict[str, str] = {"type": "json_object"}
     temperature: float = 0.5
+
+class ClaudeConfig(NamedTuple):
+    model: str = "claude-3-sonnet-20240229"
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    top_p: float = 1.0
+    top_k: int = 5
+    stream: bool = False

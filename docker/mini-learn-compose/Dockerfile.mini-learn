@@ -3,5 +3,7 @@ FROM alpine:3.20.2
 
 # Install Python, psutil, du, and free
 RUN apk add --no-cache python3 py3-pip py3-psutil procps util-linux
-RUN apk-get install coreutils
+RUN apk add  coreutils
+RUN echo "alias ls='busybox ls'" >> /etc/profile && \
+    echo "alias cat='busybox cat'" >> /etc/profile
 

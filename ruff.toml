@@ -1,0 +1,2 @@
+exclude = [".venv"]
+indent-width = 2

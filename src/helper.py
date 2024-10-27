@@ -1,11 +1,12 @@
 import difflib
 import json
 import re
+import select
 import shutil
 from pathlib import Path
+import sys
 from typing import Dict, List, Sequence
 
-from loguru import logger
 from unidecode import unidecode
 import yaml
 
@@ -193,13 +194,16 @@ def dict_representer(dumper, data):
 
 def process_old_tch(old_tch: TaggedPList) -> List[Dict]:
     new_tch = []
+
     for item in old_tch:
         if isinstance(item, list) and len(item) == 2:
             new_tch.append({"message": item[0], "tag": item[1]})
         elif isinstance(item, dict) and "message" in item and "tag" in item:
             new_tch.append(item)
         else:
+            print(old_tch)
             print(f"Unexpected format: {item}")
+            raise Exception()
 
     return new_tch
 
@@ -227,3 +231,13 @@ def get_code_diff(old_code: str, new_code: str) -> List[str]:
                 changes.append(f"Inserted '{new_substr}'")
 
     return changes
+
+
+def timed_input(prompt, timeout=3):
+    print(prompt, end="", flush=True)
+    rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+    if rlist:
+        return sys.stdin.readline().strip()
+    else:
+        print("\nContinuing...")
+        return None
