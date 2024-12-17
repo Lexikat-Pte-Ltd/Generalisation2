@@ -4,7 +4,6 @@ from src.data import EnvironmentInfo
 
 from loguru import logger
 
-
 def is_valid_code_ast(code: str) -> Tuple[bool, str]:
   try:
     ast.parse(code)

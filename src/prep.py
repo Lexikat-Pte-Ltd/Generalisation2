@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import List
 
 from src.data import EnvironmentInfo
-from src.types import TaggedMessage
+from src.types import Message, TaggedMessage
 
 SYSTEM_TEMPLATE = """
 You are an agent working in a operating system with following information encoded in \"Informations\" XML tag. Those information are
@@ -50,7 +50,7 @@ def get_system_plist(
   )
 
   return [
-    ({"role": "system", "content": system_prompt}, tag),
+    TaggedMessage(message=Message(role="system", content=system_prompt), tag=tag),
   ]
 
 
@@ -75,7 +75,7 @@ def get_basic_env_plist(
   tag=BASIC_ENV_PLIST_TAG,
   max_count=5,
 ) -> List[TaggedMessage]:
-  """(User, EnvAgent, CommonAgent, ContextProvider)
+  """(User, EnvAgent, StrategyAgent, ContextProvider)
 
   Get basic env plist for basic environment inclusion.
 
@@ -110,7 +110,7 @@ def get_basic_env_plist(
   )
 
   return [
-    ({"role": "user", "content": outer_env_infos}, tag),
+    TaggedMessage(message=Message(role="user", content=outer_env_infos), tag=tag),
   ]
 
 
@@ -136,7 +136,7 @@ def get_special_env_plist(
   tag: str = SPECIAL_ENV_PLIST_TAG,
   max_count: int = 10,
 ) -> List[TaggedMessage]:
-  """(User, EnvAgent, CommonAgent, ContextProvider)
+  """(User, EnvAgent, StrategyAgent, ContextProvider)
 
   Generate a special environment plist that precedes the generation of a special environment.
 
@@ -150,7 +150,7 @@ def get_special_env_plist(
       ...,
   ]
 
-  On CommonAgent :
+  On StrategyAgent :
   [
       ...,
       ({"role": "user", "content": "..."}, "get_basic_env_plist"),
@@ -199,7 +199,7 @@ def get_special_env_plist(
 
   # Return a list containing a single tagged message.
   return [
-    ({"role": "user", "content": outer_env_infos}, tag),
+    TaggedMessage(message=Message(role="user", content=outer_env_infos), tag=tag),
   ]
 
 
@@ -228,12 +228,12 @@ def get_strat_req_plist(
   prev_strats: List[str],
   tag=STRAT_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
-  """(User, CommonAgent, GenerationRequest, JsonListOutput)
+  """(User, StrategyAgent, GenerationRequest, JsonListOutput)
 
   Get strat gen plist for strat generation.
 
   ```
-  On CommonAgent :
+  On StrategyAgent :
   [
       ...,
       ({"role": "user", "content": "..."}, "get_special_env_plist"),
@@ -266,7 +266,7 @@ def get_strat_req_plist(
   )
 
   return [
-    ({"role": "user", "content": strat_prompt}, tag),
+    TaggedMessage(message=Message(role="user", content=strat_prompt), tag=tag),
   ]
 
 
@@ -297,6 +297,7 @@ SPECIAL_EGC_REQ_PLIST_TAG = "get_special_egc_req_plist"
 # Used by env agent
 def get_special_egc_req_plist(
   in_con_path: str | Path,
+  model_name: str,
   tag=SPECIAL_EGC_REQ_PLIST_TAG,
 ) -> List[TaggedMessage]:
   """(User, EnvAgent, GenerationRequest, JsonCodeOutput)
@@ -327,7 +328,10 @@ def get_special_egc_req_plist(
   )
 
   return [
-    ({"role": "user", "content": special_env_code_getter_prompt}, tag),
+    TaggedMessage(
+      message=Message(role="user", content=special_env_code_getter_prompt),
+      tag=f"{tag},{model_name}",
+    ),
   ]
 
 
@@ -359,7 +363,7 @@ def get_strat_code_req_plist(
   strat: str,
   tag=STRAT_CODE_REQ_TAG,
 ) -> List[TaggedMessage]:
-  """(User, CommonAgent, GenerationRequest, CodeOutput)
+  """(User, StrategyAgent, GenerationRequest, CodeOutput)
 
   Get a plist for strat code generation.
 
@@ -387,7 +391,7 @@ def get_strat_code_req_plist(
   )
 
   return [
-    ({"role": "user", "content": code_prompt}, tag),
+    TaggedMessage(message=Message(role="user", content=code_prompt), tag=tag),
   ]
 
 
@@ -425,12 +429,12 @@ def get_code_regen_plist(
   run_context: str,
   user_tag=USER_CODE_REGEN_TAG,
 ) -> List[TaggedMessage]:
-  """(User, CommonAgent, EnvAgent, GenerationRequest, CodeOutput)
+  """(User, StrategyAgent, EnvAgent, GenerationRequest, CodeOutput)
 
   Get a plist for code regeneration.
 
   ```
-  On CommonAgent and CommonAgent :
+  On StrategyAgent and StrategyAgent :
   [
       ...,
       ({"role": "user", "content": "..."}, "*REQ*"),
@@ -459,7 +463,7 @@ def get_code_regen_plist(
   )
 
   return [
-    ({"role": "user", "content": regen_prompts}, user_tag),
+    TaggedMessage(message=Message(role="user", content=regen_prompts), tag=user_tag),
   ]
 
 

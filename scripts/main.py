@@ -19,7 +19,6 @@ from src.container import (
 from src.data import EnvironmentInfo
 from src.helper import (
   format_tch,
-  format_tch_tags,
   get_code_diff,
   scan_json_files_for_strat,
   timed_input,
@@ -28,8 +27,10 @@ from src.prep import (
   get_code_regen_plist,
   get_strat_code_req_plist,
 )
-from src.gen import Genner, get_genner
-from src.agent import EnvAgent, CommonAgent
+from src.genner import Genner, get_genner
+from src.agent.EnvAgent import EnvAgent
+from src.agent.StrategyAgent import StrategyAgent
+from src.types import Message, TaggedMessage
 
 # Load environment variables
 load_dotenv()
@@ -41,7 +42,7 @@ CA_MAX_ATTEMPTS = 3
 
 FEDORA_CONTAINER_ID = "fedora-learn-compose"
 TEST_CONTAINER_ID = "mini-learn-compose"
-BACKEND = "wizardcoder"
+BACKEND = "qwen"
 OAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
@@ -52,12 +53,13 @@ def setup_logger(debug: bool) -> None:
   Args:
       debug (bool): Whether to enable debug mode.
   """
+  log_format = str(LOGURU_FORMAT)
   logger.remove()
   logger.add(
     sys.stderr,
     backtrace=debug,
     diagnose=debug,
-    format=LOGURU_FORMAT,  # type: ignore
+    format=log_format,
     level="DEBUG" if debug else "INFO",
   )
 
@@ -74,7 +76,7 @@ def log_environment_variables() -> None:
   logger.info(f"OAI_API_KEY: {'Set' if OAI_API_KEY else 'Not set'}")
 
 
-def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner]:
+def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner, Genner]:
   """
   Initialize the OpenAI client, Docker client, and code generator.
 
@@ -87,13 +89,14 @@ def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner]:
   oai_client = OpenAI(api_key=OAI_API_KEY)
   docker_client = docker.from_env()
   genner = get_genner(BACKEND, oai_client=oai_client)
+  backup_genner = get_genner("oai", oai_client=oai_client)
 
   logger.info("Clients initialized:")
   logger.info(f"oai_client: {oai_client}")
   logger.info(f"docker_client: {docker_client}")
   logger.info(f"genner: {genner}")
 
-  return oai_client, docker_client, genner
+  return oai_client, docker_client, genner, backup_genner
 
 
 def main(
@@ -110,7 +113,7 @@ def main(
   """
   setup_logger(debug)
   log_environment_variables()
-  oai_client, docker_client, genner = initialize_clients()
+  oai_client, docker_client, genner, backup_genner = initialize_clients()
 
   save_folder = Path() / "data"
   prev_strats = scan_json_files_for_strat(save_folder)
@@ -133,7 +136,7 @@ def main(
 
   new_tch = ea.get_initial_tch()
   logger.debug(f"EA - New TCH -\n{format_tch(new_tch)}")
-  ea.tagged_chat_history.extend(new_tch)
+  ea.tagged_chat_history.messages.extend(new_tch.messages)
 
   # Generate special environment getter code
   logger.info(f"EA - Generating {EA_MAX_SP_EGC} special environment getter code.")
@@ -141,12 +144,14 @@ def main(
     count=EA_MAX_SP_EGC,
     in_con_path=in_con_path,
     genner=genner,
+    backup_genner=backup_genner,
     docker_client=docker_client,
     test_container_id=test_container_id,
+    model_name=BACKEND,
     max_attempts=EA_MAX_ATTEMPTS,
   )
   logger.debug(f"EA - New TCH -\n{format_tch(new_tch)}")
-  ea.tagged_chat_history.extend(new_tch)
+  ea.tagged_chat_history.messages.extend(new_tch.messages)
   ea.sp_env_info_getter_codes.extend(new_sp_egc_s)
 
   # Execute all environment getting codes
@@ -160,7 +165,7 @@ def main(
   ea.sp_env_info_history.append(initial_special_env_infos)
 
   # Initialize common agent
-  ca = CommonAgent(
+  ca = StrategyAgent(
     init_bs_env_info_history=ea.bs_env_info_history,
     init_sp_env_info_history=ea.sp_env_info_history,
     prev_strats=prev_strats,
@@ -169,7 +174,7 @@ def main(
 
   new_tch = ca.get_initial_tch()
   logger.debug(f"EA - New TCH -\n{format_tch(new_tch)}")
-  ca.tagged_chat_history.extend(new_tch)
+  ca.tagged_chat_history.messages.extend(new_tch.messages)
 
   # Generate strategies based on the new environment info
   strats, raw_strats = ca.gen_strats(genner)
@@ -178,10 +183,10 @@ def main(
     strats = ["Clean up temporary files with commands like `rm -rf /tmp/*`."]
     raw_strats = str(strats)
 
-  ca.tagged_chat_history.append(
-    (
-      {"role": "assistant", "content": f"```python\nlist = {raw_strats}\n```"},
-      "gen_strats",
+  ca.tagged_chat_history.messages.append(
+    TaggedMessage(
+      message=Message(role="assistant", content=f"```python\nlist = {raw_strats}\n```"),
+      tag="gen_strats",
     )
   )
 
@@ -203,7 +208,7 @@ def main(
 def process_strategy(
   strat: str,
   i: int,
-  ca: CommonAgent,
+  ca: StrategyAgent,
   ea: EnvAgent,
   docker_client: docker.DockerClient,
   genner: Genner,
@@ -217,7 +222,7 @@ def process_strategy(
   Args:
       strat (str): The strategy to process.
       i (int): The index of the strategy.
-      ca (CommonAgent): The common agent instance.
+      ca (StrategyAgent): The common agent instance.
       ea (EnvAgent): The environment agent instance.
       docker_client (docker.DockerClient): The Docker client.
       genner (callable): The code generator function.
@@ -256,15 +261,15 @@ def process_strategy(
   )
 
   # Prepare the common agent chat history with prep prompts
-  copy_ca.tagged_chat_history.extend(get_strat_code_req_plist(strat=strat))
+  copy_ca.tagged_chat_history.messages.extend(get_strat_code_req_plist(strat=strat))
 
   # Generate and test code
   attempt = 0
   space_freed = 0
   while attempt < CA_MAX_ATTEMPTS:
     logger.debug(
-      f"CA - {i}-th code - {attempt}-th attempt - "
-      f"CommonAgent's in loop chat history tag - \n{format_tch_tags(copy_ca.tagged_chat_history)}"
+      f"SA - {i}-th code - {attempt}-th attempt - "
+      f"StrategyAgent's in loop chat history tag - \n{copy_ca.tagged_chat_history.messages}"
     )
 
     code, raw_response = genner.generate_code(copy_ca.chat_history)
@@ -277,9 +282,8 @@ def process_strategy(
 
     # The code is compile-able and can be executed in test container
     # Time to test it on real container
-    exit_code, execution_output, reflected_code = run_code_in_con(
-      docker_client, main_container_id, code
-    )
+    container = docker_client.containers.get(main_container_id)
+    exit_code, execution_output, reflected_code = run_code_in_con(container, code, "ea")
 
     code_diffs: List[str] = get_code_diff(code, reflected_code)
 
@@ -291,7 +295,7 @@ def process_strategy(
       logger.info("CA - Generated code and in container are the same.")
 
     fresh_basic_env_info = safe_detect_env(docker_client, main_container_id)
-    space_freed, files_deleted = loop_bs_env_info.total_files_deleted(
+    space_freed, files_deleted = loop_bs_env_info.get_total_files_deleted(
       fresh_basic_env_info
     )
 
@@ -303,13 +307,13 @@ def process_strategy(
       logger.debug(f"CA - Code is \n{code[:100]}...")
       logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
 
-      copy_ca.tagged_chat_history.append(
-        (
-          {"role": "assistant", "content": f"```python\n{code}\n```"},
-          "strat_codegen(deletion_fail)",
+      copy_ca.tagged_chat_history.messages.append(
+        TaggedMessage(
+          message=Message(role="assistant", content=f"```python\n{code}\n```"),
+          tag="strat_codegen(deletion_fail)",
         )
       )
-      copy_ca.tagged_chat_history.extend(
+      copy_ca.tagged_chat_history.messages.extend(
         get_code_regen_plist(
           task_description=f"Generate code to perform {strat}",
           error_context="No files are being freed or deleted",
@@ -326,10 +330,10 @@ def process_strategy(
     logger.info(f"CA - {i}-th strat - Codegen loop ended up in failure")
   else:
     logger.info(f"CA - {i}-th strat - Codegen loop ended up in success")
-    copy_ca.tagged_chat_history.append(
-      (
-        {"role": "assistant", "content": f"```python\n{code}\n```"},
-        "strat_codegen(success)",
+    copy_ca.tagged_chat_history.messages.append(
+      TaggedMessage(
+        message=Message(role="assistant", content=f"```python\n{code}\n```"),
+        tag="strat_codegen(success)",
       )
     )
 
@@ -350,7 +354,7 @@ def validate_and_run_code(
   code: str,
   docker_client: docker.DockerClient,
   test_container_id: str,
-  copy_ca: CommonAgent,
+  copy_ca: StrategyAgent,
   strat: str,
   i: int,
   attempt: int,
@@ -362,7 +366,7 @@ def validate_and_run_code(
       code (str): The generated code to validate and run.
       docker_client (docker.DockerClient): The Docker client.
       test_container_id (str): ID of the test Docker container.
-      copy_ca (CommonAgent): The copy of the common agent.
+      copy_ca (StrategyAgent): The copy of the common agent.
       strat (str): The current strategy being processed.
       i (int): The index of the current strategy.
       attempt (int): The current attempt number.
@@ -370,20 +374,22 @@ def validate_and_run_code(
   Returns:
       bool: True if the code is valid and runs successfully, False otherwise.
   """
+  container = docker_client.containers.get(test_container_id)
   ast_valid, ast_error = is_valid_code_ast(code)
+
   if not ast_valid:
     logger.error(
       f"CA - {i}-th strat - {attempt + 1}-th attempt - " f"AST error \n{ast_error}"
     )
     logger.debug(f"CA - Code is \n{code[:100]}...")
 
-    copy_ca.tagged_chat_history.append(
-      (
-        {"role": "assistant", "content": f"```python\n{code}\n```"},
-        "strat_codegen(ast_fail)",
+    copy_ca.tagged_chat_history.messages.append(
+      TaggedMessage(
+        message=Message(role="assistant", content=f"```python\n{code}\n```"),
+        tag="strat_codegen(ast_fail)",
       )
     )
-    copy_ca.tagged_chat_history.extend(
+    copy_ca.tagged_chat_history.messages.extend(
       get_code_regen_plist(
         task_description=f"Generate code to perform {strat}",
         error_context=ast_error,
@@ -400,13 +406,13 @@ def validate_and_run_code(
     )
     logger.debug(f"CA - Code is \n{code[:100]}...")
 
-    copy_ca.tagged_chat_history.append(
-      (
-        {"role": "assistant", "content": f"```python\n{code}\n```"},
-        "strat_codegen(compile_fail)",
+    copy_ca.tagged_chat_history.messages.append(
+      TaggedMessage(
+        message=Message(role="assistant", content=f"```python\n{code}\n```"),
+        tag="strat_codegen(compile_fail)",
       )
     )
-    copy_ca.tagged_chat_history.extend(
+    copy_ca.tagged_chat_history.messages.extend(
       get_code_regen_plist(
         task_description=f"Generate code to perform {strat}",
         error_context=compiler_error,
@@ -415,9 +421,7 @@ def validate_and_run_code(
     )
     return False
 
-  exit_code, execution_output, reflected_code = run_code_in_con(
-    docker_client, test_container_id, code
-  )
+  exit_code, execution_output, reflected_code = run_code_in_con(container, code, "ea")
 
   if exit_code != 0:
     logger.error(
@@ -427,13 +431,13 @@ def validate_and_run_code(
     logger.debug(f"CA - Code is \n{code[:100]}...")
     logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
 
-    copy_ca.tagged_chat_history.append(
-      (
-        {"role": "assistant", "content": f"```python\n{code}\n```"},
-        "strat_codegen(container_fail)",
+    copy_ca.tagged_chat_history.messages.append(
+      TaggedMessage(
+        message=Message(role="assistant", content=f"```python\n{code}\n```"),
+        tag="strat_codegen(container_fail)",
       )
     )
-    copy_ca.tagged_chat_history.extend(
+    copy_ca.tagged_chat_history.messages.extend(
       get_code_regen_plist(
         task_description=f"Generate code to perform {strat}",
         error_context=execution_output,
@@ -449,13 +453,13 @@ def validate_and_run_code(
     )
     logger.debug(f"CA - Code is \n{code[:100]}...")
 
-    copy_ca.tagged_chat_history.append(
-      (
-        {"role": "assistant", "content": f"```python\n{code}\n```"},
-        "strat_codegen(container_fail)",
+    copy_ca.tagged_chat_history.messages.append(
+      TaggedMessage(
+        message=Message(role="assistant", content=f"```python\n{code}\n```"),
+        tag="strat_codegen(container_fail)",
       )
     )
-    copy_ca.tagged_chat_history.extend(
+    copy_ca.tagged_chat_history.messages.extend(
       get_code_regen_plist(
         task_description=f"Generate code to perform {strat}",
         error_context="No code output",

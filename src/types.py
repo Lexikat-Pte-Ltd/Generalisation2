@@ -1,13 +1,59 @@
+from dataclasses import dataclass, field
 from typing import Callable, List, Dict, Tuple, TypeAlias
 
+from src import data
 
-# Example :
-# message = {"role": "system": "content": "..."}
-Message: TypeAlias = Dict[str, str]
 
-# Example :
-# tagged_message = ({"role": "system": "content": "..."}, "system")
-TaggedMessage: TypeAlias = Tuple[Message, str]
+@dataclass
+class Message:
+  role: str
+  content: str
+
+  def as_native(self) -> Dict[str, str]:
+    return {"role": self.role, "content": self.content}
+
+  @staticmethod
+  def from_native(native: Dict[str, str]) -> "Message":
+    return Message(role=native["role"], content=native["content"])
+
+  def __repr__(self) -> str:
+    return (
+      "Message(" f"\n\trole={self.role}, " f"\n\tcontent={self.content[:10]}..." "\n)"
+    )
+
+
+@dataclass
+class TaggedMessage:
+  message: Message
+  tag: str
+
+  def as_native(self) -> Tuple[Dict[str, str], str]:
+    return (
+      {
+        "role": self.message.role,
+        "content": self.message.content,
+      },
+      self.tag,
+    )
+
+  def as_message(self) -> Message:
+    return self.message
+
+  @staticmethod
+  def from_native(native: Tuple[Dict[str, str], str]) -> "TaggedMessage":
+    return TaggedMessage(
+      message=Message(role=native[0]["role"], content=native[0]["content"]),
+      tag=native[1],
+    )
+
+  def __repr__(self) -> str:
+    return (
+      "TaggedMessage("
+      f"\n\tmessage={self.message.__repr__()}, "
+      f"\n\ttag={self.tag}"
+      "\n)"
+    )
+
 
 # Example :
 # plist = [
@@ -17,7 +63,29 @@ TaggedMessage: TypeAlias = Tuple[Message, str]
 #   {"role": "user": "content": "..."},
 #   {"role": "assistant": "content": "..."},
 # ]
-PList: TypeAlias = List[Message]
+
+
+@dataclass
+class PList:
+  messages: List[Message] = field(default_factory=list)
+
+  def __len__(self) -> int:
+    return len(self.messages)
+
+  def __add__(self, other: "PList") -> "PList":
+    return PList(messages=self.messages + other.messages)
+
+  def as_native(self) -> List[Dict[str, str]]:
+    return [message.as_native() for message in self.messages]
+
+  @staticmethod
+  def from_native(native: List[Dict[str, str]]) -> "PList":
+    return PList(messages=[Message.from_native(message) for message in native])
+
+  def __repr__(self) -> str:
+    messages_repr = "\n".join([message.__repr__() for message in self.messages])
+    return "PList(" f"\n\tmessages=[\n\t\t" f"{messages_repr}" "\n\t\t]" "\n)"
+
 
 # Example :
 # tagged_plist = [
@@ -27,6 +95,45 @@ PList: TypeAlias = List[Message]
 #   ({"role": "user": "content": "..."}, "code_strategy_gen"),
 #   ({"role": "assistant": "content": "..."}, "code_strategy_reply"),
 # ]
-TaggedPList: TypeAlias = List[TaggedMessage]
 
-GennerType: TypeAlias = Callable[[List[Message]], str]
+
+@dataclass
+class TaggedPList:
+  messages: List[TaggedMessage] = field(default_factory=list)
+
+  def __len__(self) -> int:
+    return len(self.messages)
+
+  def __add__(self, other: "TaggedPList") -> "TaggedPList":
+    return TaggedPList(messages=self.messages + other.messages)
+
+  def as_native(self) -> List[Tuple[Dict[str, str], str]]:
+    return [message.as_native() for message in self.messages]
+
+  def as_plist(self) -> PList:
+    return PList(messages=[message.as_message() for message in self.messages])
+
+  @staticmethod
+  def from_native(native: List[Tuple[Dict[str, str], str]]) -> "TaggedPList":
+    return TaggedPList(
+      messages=[TaggedMessage.from_native(message) for message in native]
+    )
+
+  def modify_message_at_index(
+    self, index: int, new_tagged_message: TaggedMessage
+  ) -> "TaggedPList":
+    self.messages[index] = new_tagged_message
+
+    return self
+
+  def modify_tag_at_index(self, index: int, new_tag: str) -> "TaggedPList":
+    self.messages[index].tag = new_tag
+
+    return self
+
+  def __repr__(self) -> str:
+    messages_repr = "\n".join([message.__repr__() for message in self.messages])
+    return "TaggedPList(" f"\n\tmessages=[\n\t\t" f"{messages_repr}" "\n\t\t]" "\n)"
+
+
+GennerType: TypeAlias = Callable[[PList], str]

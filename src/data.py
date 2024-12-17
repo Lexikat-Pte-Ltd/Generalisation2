@@ -39,7 +39,7 @@ class EnvironmentInfo(BaseModel):
       f"- available_storage: {self.available_storage}"
     )
 
-  def total_files_deleted(self, fresh_env_info: EnvironmentInfo):
+  def get_total_files_deleted(self, fresh_env_info: EnvironmentInfo):
     """Assume self as the oldest object.
 
     Args:

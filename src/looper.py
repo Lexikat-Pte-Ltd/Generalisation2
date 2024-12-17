@@ -5,17 +5,17 @@ from typing import Dict, List, Any
 from docker import DockerClient
 from openai import OpenAI
 
-from src.types import TaggedMessage
+from src.types import TaggedPList
 
 
 def save_tagged_history_openai(
     task_description: str,
-    tagged_history: List[TaggedMessage],
+    tagged_plist: TaggedPList,
     failures: List[str],
     folder_name: str | Path, is_successful: bool,
 ) -> str:
     prompts_ = (
-        tagged_history if is_successful else tagged_history[:2] + tagged_history[-1:]
+        tagged_plist if is_successful else tagged_plist.messages[:2] + tagged_plist.messages[-1:]
     )
     data: Dict[str, Any] = {
         "task_name": task_description,
@@ -43,7 +43,7 @@ def run_strategy(
     container_id: str,
     task_description: str,
     initial_code: str,
-    initial_prompts: List[TaggedMessage],
+    initial_prompts: TaggedPList,
     skill_folder: str | Path,
     max_loop=7,
 ) -> bool:

@@ -1,8 +1,11 @@
 .ONESHELL:
 
+# Debug related
+VSCODE = code
+
 # Dataset related 
-SOURCE_FOLDER := /home/cc/alfath/Generalisation2/data
-PUBLISH_FOLDER := /home/cc/alfath/arabika/data
+SOURCE_FOLDER := ./data
+PUBLISH_FOLDER := ./data
 DATASET_PATTERN := *_*_*_*_*:*_run_data_at_*_*.json
 
 # Docker compose related 
@@ -22,6 +25,7 @@ else
 endif
 
 # Main rules
+debug-mode: mini-up-container fedora-up-container
 full-rund: mini-up-container fedora-up-container run-maind
 full-run: mini-up-container fedora-up-container run-main
 
@@ -29,7 +33,7 @@ run-main:
 	python scripts/main.py
 
 run-maind: 
-	python scripts/main.py --debug
+	${VSCODE} --launch-json .vscode/launch.json "${workspaceFolder}/scripts/main.py"
 
 # Container-specific rules
 mini-up-container:
@@ -95,3 +99,16 @@ attach-container:
 	else \
 		echo "No running service found"; \
 	fi
+
+# Test related
+test:
+	python -m pytest test/
+
+test-verbose:
+	python -m pytest -v test/
+
+test-coverage:
+	python -m pytest --cov=src test/
+
+test-watch:
+	ptw -- test/

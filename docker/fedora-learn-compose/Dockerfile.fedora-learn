@@ -1,11 +1,23 @@
-FROM fedora
+FROM fedora:41
 
 SHELL ["/bin/bash", "-c"]
 
-RUN dnf in -y openssl openssh-server openssh-clients adb 
-RUN dnf in -y python3 python3-pip python3-psutil procps-ng coreutils util-linux
-# RUN dnf install -y e2fsprogs
-# RUN ssh-keygen -A
+RUN dnf update -y && \
+    dnf install -y \
+    openssl \
+    openssh-server \
+    openssh-clients \
+    adb \
+    python3 \
+    python3-pip \
+    python3-psutil \
+    procps-ng \
+    coreutils \
+    util-linux && \
+    dnf clean all
+
+RUN command -v free && free -m
+RUN ldconfig
 
 ARG username=alice
 ARG doc_to_copy=documents.tar.gz
@@ -25,8 +37,10 @@ ADD --chown=${username}:${username} .ssh /home/${username}/.ssh
 ADD tmp.tar.gz /
 ADD var.tar.gz /
 
-# Create a symlink for python
-RUN ln -s /usr/bin/python3 /usr/bin/python
+# Create a symlink for python (updated to handle existing link)
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+# OR alternatively:
+# RUN rm -f /usr/bin/python && ln -s /usr/bin/python3 /usr/bin/python
 
 
 # RUN chattr +i /usr/bin/du /usr/bin/free /usr/bin/df

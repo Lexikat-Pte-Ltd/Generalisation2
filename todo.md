@@ -1,0 +1,1 @@
+- [ ] Convert `src/types.py` to utilize dataclasses on nested types

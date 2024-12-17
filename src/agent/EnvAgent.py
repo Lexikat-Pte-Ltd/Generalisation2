@@ -1,0 +1,303 @@
+from pathlib import Path
+from typing import List, Tuple
+
+from docker import DockerClient
+from loguru import logger
+
+from src.code import (
+  is_valid_code_ast,
+  is_valid_code_compiler,
+)
+from src.container import run_code_in_con
+from src.data import EnvironmentInfo
+from src.genner import Genner
+from src.helper import (
+  get_code_diff,
+)
+from src.prep import (
+  get_basic_env_plist,
+  get_code_regen_plist,
+  get_special_egc_req_plist,
+  get_system_plist,
+)
+from src.types import Message, TaggedMessage, TaggedPList
+from src.agent.BaseAgent import BaseAgent
+
+
+class EnvAgent(BaseAgent):
+  """Environment Agent for handling environment-related operations"""
+
+  def __init__(
+    self,
+    initial_basic_env_info: EnvironmentInfo,
+    in_con_path: Path | str,
+  ):
+    """Initialize environment agent to assists with main normal agent with special environment infos.
+
+    Args:
+        initial_basic_env_info (EnvironmentInfo): Initial basic environment info containing
+            information about storage size.
+        in_con_path (Path | str): In container work path.
+    """
+    super().__init__()
+    self.sp_env_info_getter_codes: List[str] = []
+    self.bs_env_info_history: List[EnvironmentInfo] = [initial_basic_env_info]
+    self.sp_env_info_history: List[List[str]] = []
+    self.in_con_path = in_con_path
+
+  def get_initial_tch(self) -> TaggedPList:
+    local_tch = TaggedPList()
+    local_tch.messages.extend(get_system_plist(in_con_path=self.in_con_path))
+    local_tch.messages.extend(get_basic_env_plist(bs_eih=self.bs_env_info_history))
+    return local_tch
+
+  def debug_log_sp_eih(
+    self, context="Logging Env Info's Special Env Info History ..."
+  ) -> None:
+    if context is not None:
+      logger.debug(context)
+    logger.debug(f"\n{self.bs_env_info_history}")
+
+  def debug_log_bs_eih(
+    self, context: str = "Logging Env Info's Basic Env Info History ..."
+  ) -> None:
+    if context is not None:
+      logger.debug(context)
+    logger.debug(f"\n{self.bs_env_info_history}")
+
+  def gen_multi_sp_egc(
+    self,
+    count: int,
+    in_con_path: str | Path,
+    genner: Genner,
+    backup_genner: Genner,
+    docker_client: DockerClient,
+    test_container_id: str,
+    model_name: str,
+    max_attempts: int = 5,
+  ) -> Tuple[TaggedPList, List[str]]:
+    local_tch = TaggedPList()
+    sp_egc: List[str] = []
+
+    for i in range(count):
+      local_tch.messages.extend(get_special_egc_req_plist(model_name, str(in_con_path)))
+
+      env_getter_code, succeed, new_tch = self.gen_single_sp_egc(
+        count=i,
+        genner=genner,
+        docker_client=docker_client,
+        testing_container_id=test_container_id,
+        model_name=model_name,
+        max_attempts=max_attempts,
+      )
+
+      if succeed:
+        logger.info(
+          f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
+        )
+        local_tch = local_tch + new_tch
+        sp_egc.append(env_getter_code)
+
+        continue
+
+      env_getter_code, succeed, new_tch = self.gen_single_sp_egc(
+        count=i,
+        genner=backup_genner,
+        docker_client=docker_client,
+        testing_container_id=test_container_id,
+        model_name=model_name,
+        max_attempts=max_attempts,
+      )
+
+      if succeed:
+        new_tch.modify_tag_at_index(index=0, new_tag="gen_sp_egc()")
+        logger.info(
+          f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
+        )
+        local_tch.messages.extend(new_tch.messages)
+        sp_egc.append(env_getter_code)
+        continue
+
+    return local_tch, sp_egc
+
+  def gen_single_sp_egc(
+    self,
+    count: int,
+    genner: Genner,
+    docker_client: DockerClient,
+    testing_container_id: str,
+    model_name: str,
+    max_attempts: int = 3,
+  ) -> Tuple[str, bool, TaggedPList]:
+    local_tch: TaggedPList = TaggedPList()
+    local_tch.messages.extend(
+      get_special_egc_req_plist(model_name, str(self.in_con_path))
+    )
+
+    for attempt in range(max_attempts):
+      logger.debug(
+        f"EA - {count}-th code - {attempt}-th attempt - "
+        f"EnvAgent's in loop chat history tags - \n {str(self.tagged_chat_history)}"
+      )
+
+      try:
+        code, _ = genner.generate_code(
+          self.tagged_chat_history.as_plist() + local_tch.as_plist(),
+        )
+      except Exception as e:
+        logger.error(f"Code generation failed: {e}")
+        continue
+
+      if not self.validate_code(
+        code, docker_client, testing_container_id, local_tch, count, attempt
+      ):
+        logger.info(f"EA - {count}-th code - Codegen loop failed, retrying...")
+        continue
+
+      logger.info(f"EA - {count}-th code - Codegen loop succeed")
+      logger.info(f"EA - {count}-th code - Cache TCH is {len(local_tch)}")
+      logger.debug(f"EA - {count}-th code - Code is \n{code}")
+
+      return code, True, local_tch
+
+    return "", False, local_tch
+
+  def validate_code(
+    self,
+    code: str,
+    docker_client: DockerClient,
+    testing_container_id: str,
+    local_tch: TaggedPList,
+    count: int,
+    attempt: int,
+  ):
+    container = docker_client.containers.get(testing_container_id)
+
+    ast_valid, ast_error = is_valid_code_ast(code)
+    if not ast_valid:
+      logger.error(
+        f"EA - {count}-th code - {attempt}-th attempt - AST error \n{ast_error}"
+      )
+      logger.debug(f"EA - Code is \n{code[:100]}...")
+      local_tch.messages.append(
+        TaggedMessage(
+          message=Message(role="assistant", content=f"```python\n{code}\n```"),
+          tag="gen_sp_egc(ast_fail)",
+        )
+      )
+      local_tch.messages.extend(
+        get_code_regen_plist(
+          task_description="Generate and test code for getting non-basic environment info",
+          error_context=ast_error,
+          run_context="a Python AST compiler",
+        )
+      )
+      return False
+
+    compile_valid, compiler_error = is_valid_code_compiler(code)
+    if not compile_valid:
+      logger.error(
+        f"EA - {count}-th code - {attempt}-th attempt - Native `compile` error \n{compiler_error}"
+      )
+      logger.debug(f"EA - Code is \n{code[:100]}...")
+      local_tch.messages.append(
+        TaggedMessage(
+          message=Message(role="assistant", content=f"```python\n{code}\n```"),
+          tag="gen_sp_egc(compile_fail)",
+        )
+      )
+      local_tch.messages.extend(
+        get_code_regen_plist(
+          task_description="Generate and test code for getting non-basic environment info",
+          error_context=compiler_error,
+          run_context="a Python native compiler",
+        )
+      )
+      return False
+
+    exit_code, execution_output, reflected_code = run_code_in_con(container, code, "ea")
+
+    code_diffs = get_code_diff(code, reflected_code)
+    if len(code_diffs) > 0 and exit_code == 1:
+      logger.error(code_diffs)
+      raise Exception(
+        "EA - Generated code and in container are different and it also doesnt work."
+      )
+    elif len(code_diffs) == 0 and exit_code == 0:
+      logger.info("EA - Generated code and in container are the same.")
+
+    if exit_code != 0:
+      logger.error(
+        f"EA - {count}-th code - {attempt}-th attempt - In container error \n{execution_output}"
+      )
+      logger.debug(f"EA - Code is \n{code[:100]}...")
+      local_tch.messages.append(
+        TaggedMessage(
+          message=Message(role="assistant", content=f"```python\n{code}\n```"),
+          tag="gen_sp_egc(container_fail)",
+        )
+      )
+      local_tch.messages.extend(
+        get_code_regen_plist(
+          task_description="Generate and test code for getting non-basic environment info",
+          error_context=execution_output,
+          run_context="a Docker container",
+        )
+      )
+      return False
+
+    if execution_output.strip() == "":
+      logger.error(
+        f"EA - {count}-th code - {attempt}-th attempt - The code doesnt return any output"
+      )
+      logger.debug(f"EA - Code is \n{code[:100]}...")
+      local_tch.messages.append(
+        TaggedMessage(
+          message=Message(role="assistant", content=f"```python\n{code}\n```"),
+          tag="gen_sp_egc(container_fail)",
+        )
+      )
+      local_tch.messages.extend(
+        get_code_regen_plist(
+          task_description="Generate and test code for getting non-basic environment info",
+          error_context="No files are being freed or deleted",
+          run_context="a Docker container",
+        )
+      )
+      return False
+
+    local_tch.messages.append(
+      TaggedMessage(
+        message=Message(role="assistant", content=f"```python\n{code}\n```"),
+        tag="gen_sp_egc(success)",
+      )
+    )
+
+    return True
+
+  def execute_sp_egc_s(
+    self, docker_client: DockerClient, container_id: str
+  ) -> List[str]:
+    results = []
+    container = docker_client.containers.get(container_id)
+
+    for code in self.sp_env_info_getter_codes:
+      _, container_result, reflected_code = run_code_in_con(container, code, "ea")
+      logger.debug(f"EA - Code is \n{code[:100]}...")
+      code_diffs = get_code_diff(code, reflected_code)
+      if len(code_diffs) > 0:
+        logger.info(code_diffs)
+        logger.warning("EA - Generated code and in container are different.")
+      else:
+        logger.info("EA - Generated code and in container are the same.")
+      results.append(container_result)
+    return results
+
+  def append_new_code(self, code: str, tag="special_env_getter_code"):
+    self.sp_env_info_getter_codes.append(code)
+
+  def save_data(self, folder: Path | str):
+    extra_data = {
+      "sp_egc_s": self.sp_env_info_getter_codes,
+    }
+    super().save_data(folder, "ea", extra_data)
