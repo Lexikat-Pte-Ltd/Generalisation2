@@ -1,3 +1,4 @@
+import json
 import re
 import ast
 from typing import List
@@ -24,14 +25,22 @@ class QwenGenner(OllamaGenner):
 
   @staticmethod
   def extract_list(response: str) -> List[str]:
-    start = response.index("[")
-    end = response.rindex("]") + 1
-    list_string = response[start:end]
+    # Remove markdown code block markers and "json" label
+    json_str = response.replace("```json", "").replace("```", "").strip()
 
-    # Parse the string to a Python list
-    processed_list = ast.literal_eval(list_string)
+    # Parse the JSON string
+    data = json.loads(json_str)
+    if "strategies" in data:
+      processed_list = data["strategies"]
+    elif "strats" in data:
+      processed_list = data["strats"]
+    else:
+      raise ValueError("No strategies found in the response")
 
-    assert isinstance(processed_list, list)
-    assert all(isinstance(item, str) for item in processed_list)
+    # Validate types
+    assert isinstance(processed_list, list), "Result must be a list"
+    assert all(
+      isinstance(item, str) for item in processed_list
+    ), "All items must be strings"
 
     return processed_list

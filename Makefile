@@ -33,7 +33,7 @@ run-main:
 	python scripts/main.py
 
 run-maind: 
-	${VSCODE} --launch-json .vscode/launch.json "${workspaceFolder}/scripts/main.py"
+	python scripts/main.py --debug
 
 # Container-specific rules
 mini-up-container:

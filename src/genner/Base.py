@@ -49,6 +49,7 @@ class OllamaGenner(Genner):
     response: ChatResponse = chat(self.config.model, messages.as_native())
     assert response.message.content is not None
     return response.message.content
+    
 
   # def plist_completion(self, messages: PList) -> str:
   #   payload = {

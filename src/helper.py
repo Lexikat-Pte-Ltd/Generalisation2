@@ -11,7 +11,7 @@ from unidecode import unidecode
 import yaml
 
 from src.data import EnvironmentInfo
-from src.types import Message, PList, TaggedMessage, TaggedPList
+from src.types import PList, TaggedPList
 
 
 def scan_json_files_for_strat(folder_path):
@@ -25,8 +25,8 @@ def scan_json_files_for_strat(folder_path):
         data = json.load(file)
 
         # Check if 'strat' key exists directly in the JSON data
-        if "strat" in data:
-          strat_list.append(data["strat"])
+        if "chosen_strat" in data:
+          strat_list.append(data["chosen_strat"])
     except json.JSONDecodeError:
       print(f"Error decoding JSON in file: {file_path.name}")
     except IOError:
@@ -183,6 +183,19 @@ def normalize_escapes(s: str) -> str:
   return s.encode("utf-8").decode("unicode_escape")
 
 
+def get_alpha_first_sentences(s: str) -> str:
+  words = s.split(" ")
+  return "".join([c.lower() for c in words[0] if c.isalpha()])
+
+
+def get_readable_stratname_format(s: str) -> str:
+  words = s.split(" ")
+  first_word = words[0].lower()
+  alpha_words = [word.lower() for word in words[1:] if word.isalpha()]
+
+  return f"{first_word}_{''.join(alpha_words)[:20]}"
+
+
 def get_code_diff(
   old_code: str, new_code: str, ignore_line_endings: bool = True
 ) -> List[str]:
@@ -229,4 +242,3 @@ def timed_input(prompt, timeout=3):
   else:
     print("\nContinuing...")
     return None
-

@@ -217,6 +217,7 @@ strats = [
     ...
     "strategyN",
 ]
+```
 
 Replace "strategy1", etc. with actual strategies. Include minimum of 10 strategies. Output only the JSON object, nothing else.
 """.strip()

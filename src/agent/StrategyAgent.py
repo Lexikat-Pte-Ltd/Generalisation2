@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from src.data import EnvironmentInfo
 from src.genner import Genner
@@ -9,8 +9,8 @@ from src.prep import (
   get_strat_req_plist,
   get_system_plist,
 )
-from src.types import TaggedMessage, TaggedPList
-from src.agent.BaseAgent import BaseAgent
+from src.types import TaggedPList
+from .BaseAgent import BaseAgent
 
 
 class StrategyAgent(BaseAgent):
@@ -37,6 +37,7 @@ class StrategyAgent(BaseAgent):
     self.init_bs_env_info_history = init_bs_env_info_history
     self.init_sp_env_info_history = init_sp_env_info_history
     self.prev_strats = prev_strats
+    self.chosen_strat: str = ""
 
   def get_initial_tch(self) -> TaggedPList:
     local_tch = TaggedPList()
@@ -103,22 +104,35 @@ class StrategyAgent(BaseAgent):
 
     return changes
 
-  def save_data(self, folder: Path | str, space_freed: float, strat: str):
-    """Save strategy agent data to file.
-
-    Args:
-        folder (Path | str): Folder to save to
-        space_freed (float): Amount of space freed
-        strat (str): Strategy used
-    """
-    extra_data = {
-      "strat": strat,
-      "space_freed": space_freed,
+  def as_native(self) -> Dict[str, Any]:
+    return {
+      "chosen_strat": self.chosen_strat,
+      "strats": self.strats,
+      "in_con_path": str(self.in_con_path),
+      "init_bs_env_info_history": [
+        env_info.as_native() for env_info in self.init_bs_env_info_history
+      ],
+      "init_sp_env_info_history": self.init_sp_env_info_history,
+      "tagged_chat_history": self.tagged_chat_history.as_native(),
+      "prev_strats": self.prev_strats,
     }
 
-    # Generate strategy-specific identifier for the filename
-    strat_identifier = "".join(
-      [word[0].lower() for word in strat.split(" ") if word.isalpha()][:10]
-    )
+  # def save_data(self, folder: Path | str, space_freed: float, strat: str):
+  #   """Save strategy agent data to file.
 
-    super().save_data(folder, f"ca_{strat_identifier}", extra_data)
+  #   Args:
+  #       folder (Path | str): Folder to save to
+  #       space_freed (float): Amount of space freed
+  #       strat (str): Strategy used
+  #   """
+  #   extra_data = {
+  #     "strat": strat,
+  #     "space_freed": space_freed,
+  #   }
+
+  #   # Generate strategy-specific identifier for the filename
+  #   strat_identifier = "".join(
+  #     [word[0].lower() for word in strat.split(" ") if word.isalpha()][:10]
+  #   )
+
+  #   super().save_data(folder, f"ca_{strat_identifier}", extra_data)

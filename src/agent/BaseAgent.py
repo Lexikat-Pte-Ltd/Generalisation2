@@ -43,33 +43,33 @@ class BaseAgent:
     """
     raise NotImplementedError
 
-  def save_data(self, folder: Path | str, prefix: str, extra_data: dict | None = None):
-    """Save agent data to YAML file.
+  # def save_data(self, folder: Path | str, prefix: str, extra_data: dict | None = None):
+  #   """Save agent data to YAML file.
 
-    Args:
-        folder (Path | str): Folder to save data to
-        prefix (str): Prefix for filename
-        extra_data (dict, optional): Additional data to save. Defaults to None.
-    """
-    yaml.add_representer(str, represent_multiline_str)
+  #   Args:
+  #       folder (Path | str): Folder to save data to
+  #       prefix (str): Prefix for filename
+  #       extra_data (dict, optional): Additional data to save. Defaults to None.
+  #   """
+  #   yaml.add_representer(str, represent_multiline_str)
 
-    tch_len = len(self.tagged_chat_history.as_plist().messages)
-    formatted_datetime = datetime.now().strftime("%Y_%m_%d_%H:%M")
-    file_name = f"{prefix}_{formatted_datetime}_run_data_at_{tch_len}.yaml"
+  #   tch_len = len(self.tagged_chat_history.as_plist().messages)
+  #   formatted_datetime = datetime.now().strftime("%Y_%m_%d_%H:%M")
+  #   file_name = f"{prefix}_{formatted_datetime}_run_data_at_{tch_len}.yaml"
 
-    save_data = {
-      "tag": f"[history, {prefix}]",
-      "tagged_chat_history": self.tagged_chat_history.as_native(),
-    }
+  #   save_data = {
+  #     "tag": f"[history, {prefix}]",
+  #     "tagged_chat_history": self.tagged_chat_history.as_native(),
+  #   }
 
-    if extra_data:
-      save_data.update(extra_data)
+  #   if extra_data:
+  #     save_data.update(extra_data)
 
-    with open(Path(folder) / file_name, "w") as yaml_file:
-      yaml.dump(
-        save_data,
-        yaml_file,
-        width=100,
-        default_flow_style=False,
-        sort_keys=False,
-      )
+  #   with open(Path(folder) / file_name, "w") as yaml_file:
+  #     yaml.dump(
+  #       save_data,
+  #       yaml_file,
+  #       width=100,
+  #       default_flow_style=False,
+  #       sort_keys=False,
+  #     )

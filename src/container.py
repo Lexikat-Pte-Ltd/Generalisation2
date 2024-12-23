@@ -268,3 +268,52 @@ def run_code_in_con(container: Container, code: str, type: str) -> Tuple[int, st
     python_output.decode("utf-8", errors="replace"),
     reflected_code,
   )
+
+
+def repopulate_container(
+  container: Container,
+  base_path: Path | str = "./docker/fedora-learn-compose",
+  username: str = "alice",
+) -> None:
+  """
+  Restores files inside a running container from host files.
+  Args:
+      container: Docker container object
+      base_path: Base path for source files
+      username: Username in the container (defaults to 'alice')
+  """
+  try:
+    # Set up paths
+    base_path = Path(base_path)
+    container_home = Path("/")
+
+    # Define and process files
+    files = {
+      base_path / "tmp.tar.gz": Path("/"),
+      base_path / "var.tar.gz": Path("/"),
+      base_path / "documents.tar.gz": container_home,
+      base_path / ".ssh": container_home / ".ssh",
+      base_path / "scripts/randomly_encrypt.sh": container_home,
+      base_path / "scripts/set_random_permissions.sh": container_home,
+    }
+
+    print(f"Restoring files to container {container.name}...")
+
+    # Copy files to container
+    for src, dest in files.items():
+      if src.exists():
+        print(f"Copying {src.name}...")
+        with src.open("rb") as f:
+          container.put_archive(str(dest), f.read())
+
+    # Set permissions and run scripts
+    for script in ["randomly_encrypt.sh", "set_random_permissions.sh"]:
+      script_path = container_home / script
+      container.exec_run(f"chmod 777 {script_path}")
+      container.exec_run(f"/bin/bash {script_path}", workdir=str(container_home))
+
+    print("Files restored successfully!")
+
+  except Exception as e:
+    print(f"Error during restoration: {str(e)}")
+    raise

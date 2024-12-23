@@ -1,25 +1,32 @@
+from datetime import datetime
+import os
+import sys
 from argparse import ArgumentParser
 from copy import deepcopy
-import os
 from pathlib import Path
-import sys
 from typing import List, Tuple
 
-import docker
 from dotenv import load_dotenv
-from openai import OpenAI
 from loguru import logger
 from loguru._defaults import LOGURU_FORMAT
+from openai import OpenAI
 
+import docker
+from src.agent import save_agent_data, save_list_of_agent_data
+from src.agent.EnvAgent import EnvAgent
+from src.agent.StrategyAgent import StrategyAgent
 from src.code import is_valid_code_ast, is_valid_code_compiler
 from src.container import (
   run_code_in_con,
   safe_detect_env,
 )
 from src.data import EnvironmentInfo
+from src.genner import Genner, get_genner
 from src.helper import (
   format_tch,
+  get_alpha_first_sentences,
   get_code_diff,
+  get_readable_stratname_format,
   scan_json_files_for_strat,
   timed_input,
 )
@@ -27,9 +34,6 @@ from src.prep import (
   get_code_regen_plist,
   get_strat_code_req_plist,
 )
-from src.genner import Genner, get_genner
-from src.agent.EnvAgent import EnvAgent
-from src.agent.StrategyAgent import StrategyAgent
 from src.types import Message, TaggedMessage
 
 # Load environment variables
@@ -177,11 +181,11 @@ def main(
   ca.tagged_chat_history.messages.extend(new_tch.messages)
 
   # Generate strategies based on the new environment info
-  strats, raw_strats = ca.gen_strats(genner)
+  ca.strats, raw_strats = ca.gen_strats(genner)
 
   if debug:
-    strats = ["Clean up temporary files with commands like `rm -rf /tmp/*`."]
-    raw_strats = str(strats)
+    ca.strats = ["Clean up temporary files with commands like `rm -rf /tmp/*`."]
+    raw_strats = str(ca.strats)
 
   ca.tagged_chat_history.messages.append(
     TaggedMessage(
@@ -190,9 +194,12 @@ def main(
     )
   )
 
+  total_space_freed = 0
+  total_success = 0
+  list_of_ca: List[StrategyAgent] = []
   # Process each strategy
-  for i, strat in enumerate(strats):
-    process_strategy(
+  for i, strat in enumerate(ca.strats):
+    space_freed, strat_local_ca = process_strategy(
       strat=strat,
       i=i,
       ca=ca,
@@ -201,8 +208,28 @@ def main(
       genner=genner,
       main_container_id=main_container_id,
       test_container_id=test_container_id,
-      save_folder=save_folder,
     )
+
+    total_space_freed += space_freed
+    total_success += 1 if space_freed > 0 else 0
+
+    strat_local_ca.chosen_strat = strat
+
+    list_of_ca.append(strat_local_ca)
+
+  timedate = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+  save_path = save_folder / f"full_agent_data_{timedate}.json"
+
+  save_list_of_agent_data(
+    strat_agents=list_of_ca,
+    env_agent=ea,
+    space_freed=total_space_freed,
+    save_path=save_path,
+  )
+
+  logger.info(
+    f"{total_success} successful strats across {len(ca.strats)} strats, {total_space_freed} space freed across {len(ca.strats)} strats"
+  )
 
 
 def process_strategy(
@@ -214,8 +241,7 @@ def process_strategy(
   genner: Genner,
   main_container_id: str,
   test_container_id: str,
-  save_folder: Path,
-) -> None:
+) -> Tuple[float, StrategyAgent]:
   """
   Process a single strategy, generating and testing code.
 
@@ -231,7 +257,7 @@ def process_strategy(
       save_folder (Path): The folder to save data.
   """
   logger.info(f"CA - {i}-th strat - Code loop started on strat {strat}...")
-  copy_ca = deepcopy(ca)
+  strat_local_ca = deepcopy(ca)
 
   # Get fresh environment info
   loop_bs_env_info = safe_detect_env(docker_client, main_container_id)
@@ -243,25 +269,17 @@ def process_strategy(
   )
 
   # Update the environment info state of the common agent
-  changes = copy_ca.update_env_info_state(
+  changes = strat_local_ca.update_env_info_state(
     ea.bs_env_info_history, ea.sp_env_info_history
   )
   logger.info(
     f"CA - {i}-th strat - Number of updates on common agent env info's state {changes}"
   )
 
-  # Save data before proceeding
-  copy_ca.save_data(
-    space_freed=-1,  # No space freed but can be useful maybe
-    strat=strat,
-    folder=save_folder,
-  )
-  logger.info(
-    f"CA - {i}-th strat - Saved data @ {len(copy_ca.tagged_chat_history)} on {save_folder}."
-  )
-
   # Prepare the common agent chat history with prep prompts
-  copy_ca.tagged_chat_history.messages.extend(get_strat_code_req_plist(strat=strat))
+  strat_local_ca.tagged_chat_history.messages.extend(
+    get_strat_code_req_plist(strat=strat)
+  )
 
   # Generate and test code
   attempt = 0
@@ -269,13 +287,13 @@ def process_strategy(
   while attempt < CA_MAX_ATTEMPTS:
     logger.debug(
       f"SA - {i}-th code - {attempt}-th attempt - "
-      f"StrategyAgent's in loop chat history tag - \n{copy_ca.tagged_chat_history.messages}"
+      f"StrategyAgent's in loop chat history tag - \n{strat_local_ca.tagged_chat_history.messages}"
     )
 
-    code, raw_response = genner.generate_code(copy_ca.chat_history)
+    code, raw_response = genner.generate_code(strat_local_ca.chat_history)
 
     if not validate_and_run_code(
-      code, docker_client, test_container_id, copy_ca, strat, i, attempt
+      code, docker_client, test_container_id, strat_local_ca, strat, i, attempt
     ):
       attempt += 1
       continue
@@ -307,13 +325,13 @@ def process_strategy(
       logger.debug(f"CA - Code is \n{code[:100]}...")
       logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
 
-      copy_ca.tagged_chat_history.messages.append(
+      strat_local_ca.tagged_chat_history.messages.append(
         TaggedMessage(
           message=Message(role="assistant", content=f"```python\n{code}\n```"),
           tag="strat_codegen(deletion_fail)",
         )
       )
-      copy_ca.tagged_chat_history.messages.extend(
+      strat_local_ca.tagged_chat_history.messages.extend(
         get_code_regen_plist(
           task_description=f"Generate code to perform {strat}",
           error_context="No files are being freed or deleted",
@@ -330,7 +348,7 @@ def process_strategy(
     logger.info(f"CA - {i}-th strat - Codegen loop ended up in failure")
   else:
     logger.info(f"CA - {i}-th strat - Codegen loop ended up in success")
-    copy_ca.tagged_chat_history.messages.append(
+    strat_local_ca.tagged_chat_history.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
         tag="strat_codegen(success)",
@@ -339,15 +357,10 @@ def process_strategy(
 
   logger.debug(f"CA - {i}-th strat - Code is \n{code[:100]}...")
 
-  copy_ca.save_data(
-    space_freed=space_freed,
-    strat=strat,
-    folder=save_folder,
-  )
-  ea.save_data(folder=save_folder)
-
   logger.info(f"Code loop is done for the strat {strat} on {attempt}-th iteration.")
   logger.info("Continuing to next strat if exists...")
+
+  return space_freed, strat_local_ca
 
 
 def validate_and_run_code(

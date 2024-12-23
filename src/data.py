@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List
+from typing import Any, Dict, List
 
 from pydantic import BaseModel
 from textwrap import dedent
@@ -58,3 +58,12 @@ class EnvironmentInfo(BaseModel):
       return storage_diff, True
     else:
       return storage_diff, False
+
+  def as_native(self) -> Dict[str, Any]:
+    return {
+      "total_system_memory": self.total_system_memory,
+      "available_system_memory": self.available_system_memory,
+      "running_memory": self.running_memory,
+      "total_storage": self.total_storage,
+      "available_storage": self.available_storage,
+    }

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from docker import DockerClient
 from loguru import logger
@@ -21,7 +21,7 @@ from src.prep import (
   get_system_plist,
 )
 from src.types import Message, TaggedMessage, TaggedPList
-from src.agent.BaseAgent import BaseAgent
+from .BaseAgent import BaseAgent
 
 
 class EnvAgent(BaseAgent):
@@ -49,6 +49,7 @@ class EnvAgent(BaseAgent):
     local_tch = TaggedPList()
     local_tch.messages.extend(get_system_plist(in_con_path=self.in_con_path))
     local_tch.messages.extend(get_basic_env_plist(bs_eih=self.bs_env_info_history))
+
     return local_tch
 
   def debug_log_sp_eih(
@@ -80,8 +81,6 @@ class EnvAgent(BaseAgent):
     sp_egc: List[str] = []
 
     for i in range(count):
-      local_tch.messages.extend(get_special_egc_req_plist(model_name, str(in_con_path)))
-
       env_getter_code, succeed, new_tch = self.gen_single_sp_egc(
         count=i,
         genner=genner,
@@ -220,9 +219,7 @@ class EnvAgent(BaseAgent):
     code_diffs = get_code_diff(code, reflected_code)
     if len(code_diffs) > 0 and exit_code == 1:
       logger.error(code_diffs)
-      raise Exception(
-        "EA - Generated code and in container are different and it also doesnt work."
-      )
+      return False
     elif len(code_diffs) == 0 and exit_code == 0:
       logger.info("EA - Generated code and in container are the same.")
 
@@ -296,8 +293,18 @@ class EnvAgent(BaseAgent):
   def append_new_code(self, code: str, tag="special_env_getter_code"):
     self.sp_env_info_getter_codes.append(code)
 
-  def save_data(self, folder: Path | str):
-    extra_data = {
-      "sp_egc_s": self.sp_env_info_getter_codes,
+  def as_native(self) -> Dict[str, Any]:
+    return {
+      "tagged_chat_history": self.tagged_chat_history.as_native(),
+      "special_env_info_getter_codes": self.sp_env_info_getter_codes,
+      "basic_env_info_history": [
+        env_info.as_native() for env_info in self.bs_env_info_history
+      ],
+      "special_env_info_history": self.sp_env_info_history,
     }
-    super().save_data(folder, "ea", extra_data)
+
+  # def save_data(self, folder: Path | str):
+  #   extra_data = {
+  #     "sp_egc_s": self.sp_env_info_getter_codes,
+  #   }
+  #   super().save_data(folder, "ea", extra_data)
