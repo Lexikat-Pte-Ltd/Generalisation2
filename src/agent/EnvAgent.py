@@ -109,7 +109,6 @@ class EnvAgent(BaseAgent):
       )
 
       if succeed:
-        new_tch.modify_tag_at_index(index=0, new_tag="gen_sp_egc()")
         logger.info(
           f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
         )
@@ -130,7 +129,10 @@ class EnvAgent(BaseAgent):
   ) -> Tuple[str, bool, TaggedPList]:
     local_tch: TaggedPList = TaggedPList()
     local_tch.messages.extend(
-      get_special_egc_req_plist(model_name, str(self.in_con_path))
+      get_special_egc_req_plist(
+        in_con_path=self.in_con_path,
+        model_name=model_name,
+      )
     )
 
     for attempt in range(max_attempts):
@@ -139,22 +141,26 @@ class EnvAgent(BaseAgent):
         f"EnvAgent's in loop chat history tags - \n {str(self.tagged_chat_history)}"
       )
 
-      try:
-        code, _ = genner.generate_code(
-          self.tagged_chat_history.as_plist() + local_tch.as_plist(),
-        )
-      except Exception as e:
-        logger.error(f"Code generation failed: {e}")
+      list_of_problems, code, raw_response = genner.generate_code(
+        self.tagged_chat_history.as_plist() + local_tch.as_plist(),
+      )
+
+      if len(list_of_problems) > 0:
+        logger.error(f"Code generation failed: {list_of_problems}, raw response: {raw_response}")
         continue
 
-      if not self.validate_code(
-        code, docker_client, testing_container_id, local_tch, count, attempt
-      ):
+      succeed, new_tch = self.validate_code(
+        code, docker_client, testing_container_id, count, attempt
+      )
+      local_tch = local_tch + new_tch
+
+      if not succeed:
         logger.info(f"EA - {count}-th code - Codegen loop failed, retrying...")
         continue
 
-      logger.info(f"EA - {count}-th code - Codegen loop succeed")
-      logger.info(f"EA - {count}-th code - Cache TCH is {len(local_tch)}")
+      logger.info(
+        f"EA - {count}-th code - Codegen loop succeed. Local SA TCH tags are {local_tch.get_tags()}"
+      )
       logger.debug(f"EA - {count}-th code - Code is \n{code}")
 
       return code, True, local_tch
@@ -166,10 +172,10 @@ class EnvAgent(BaseAgent):
     code: str,
     docker_client: DockerClient,
     testing_container_id: str,
-    local_tch: TaggedPList,
     count: int,
     attempt: int,
-  ):
+  ) -> Tuple[bool, TaggedPList]:
+    local_tch: TaggedPList = TaggedPList()
     container = docker_client.containers.get(testing_container_id)
 
     ast_valid, ast_error = is_valid_code_ast(code)
@@ -181,7 +187,7 @@ class EnvAgent(BaseAgent):
       local_tch.messages.append(
         TaggedMessage(
           message=Message(role="assistant", content=f"```python\n{code}\n```"),
-          tag="gen_sp_egc(ast_fail)",
+          tag="genned_sp_egc(ast_fail)",
         )
       )
       local_tch.messages.extend(
@@ -191,7 +197,7 @@ class EnvAgent(BaseAgent):
           run_context="a Python AST compiler",
         )
       )
-      return False
+      return False, local_tch
 
     compile_valid, compiler_error = is_valid_code_compiler(code)
     if not compile_valid:
@@ -202,7 +208,7 @@ class EnvAgent(BaseAgent):
       local_tch.messages.append(
         TaggedMessage(
           message=Message(role="assistant", content=f"```python\n{code}\n```"),
-          tag="gen_sp_egc(compile_fail)",
+          tag="genned_sp_egc(compile_fail)",
         )
       )
       local_tch.messages.extend(
@@ -212,14 +218,14 @@ class EnvAgent(BaseAgent):
           run_context="a Python native compiler",
         )
       )
-      return False
+      return False, local_tch
 
     exit_code, execution_output, reflected_code = run_code_in_con(container, code, "ea")
 
     code_diffs = get_code_diff(code, reflected_code)
     if len(code_diffs) > 0 and exit_code == 1:
       logger.error(code_diffs)
-      return False
+      return False, local_tch
     elif len(code_diffs) == 0 and exit_code == 0:
       logger.info("EA - Generated code and in container are the same.")
 
@@ -231,7 +237,7 @@ class EnvAgent(BaseAgent):
       local_tch.messages.append(
         TaggedMessage(
           message=Message(role="assistant", content=f"```python\n{code}\n```"),
-          tag="gen_sp_egc(container_fail)",
+          tag="genned_sp_egc(container_fail)",
         )
       )
       local_tch.messages.extend(
@@ -241,7 +247,7 @@ class EnvAgent(BaseAgent):
           run_context="a Docker container",
         )
       )
-      return False
+      return False, local_tch
 
     if execution_output.strip() == "":
       logger.error(
@@ -251,7 +257,7 @@ class EnvAgent(BaseAgent):
       local_tch.messages.append(
         TaggedMessage(
           message=Message(role="assistant", content=f"```python\n{code}\n```"),
-          tag="gen_sp_egc(container_fail)",
+          tag="genned_sp_egc(container_fail)",
         )
       )
       local_tch.messages.extend(
@@ -261,16 +267,16 @@ class EnvAgent(BaseAgent):
           run_context="a Docker container",
         )
       )
-      return False
+      return False, local_tch
 
     local_tch.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
-        tag="gen_sp_egc(success)",
+        tag="genned_sp_egc(success)",
       )
     )
 
-    return True
+    return True, local_tch
 
   def execute_sp_egc_s(
     self, docker_client: DockerClient, container_id: str
@@ -290,7 +296,7 @@ class EnvAgent(BaseAgent):
       results.append(container_result)
     return results
 
-  def append_new_code(self, code: str, tag="special_env_getter_code"):
+  def append_new_code(self, code: str):
     self.sp_env_info_getter_codes.append(code)
 
   def as_native(self) -> Dict[str, Any]:
@@ -302,9 +308,3 @@ class EnvAgent(BaseAgent):
       ],
       "special_env_info_history": self.sp_env_info_history,
     }
-
-  # def save_data(self, folder: Path | str):
-  #   extra_data = {
-  #     "sp_egc_s": self.sp_env_info_getter_codes,
-  #   }
-  #   super().save_data(folder, "ea", extra_data)

@@ -41,13 +41,17 @@ def save_agent_data(
 
 
 def save_list_of_agent_data(
-  strat_agents: List[StrategyAgent],
+  main_strat_agent: StrategyAgent,
+  copy_strat_agents: List[StrategyAgent],
   env_agent: EnvAgent,
   space_freed: float,
   save_path: Path | str,
 ):
   data = {
-    "strat_agents": [strat_agent.as_native() for strat_agent in strat_agents],
+    "main_strat_agent": main_strat_agent.as_native(),
+    "copy_strat_agents": [
+      strat_agent.as_native() for strat_agent in copy_strat_agents
+    ],
     "env_agent": env_agent.as_native(),
     "space_freed": space_freed,
   }

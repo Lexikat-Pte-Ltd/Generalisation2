@@ -122,7 +122,7 @@ class TaggedPList:
   def modify_message_at_index(
     self, index: int, new_tagged_message: TaggedMessage
   ) -> "TaggedPList":
-    self.messages[index] = new_tagged_message
+    self.messages[index].message = new_tagged_message.message
 
     return self
 
@@ -130,6 +130,9 @@ class TaggedPList:
     self.messages[index].tag = new_tag
 
     return self
+
+  def get_tags(self) -> List[str]:
+    return [message.tag for message in self.messages]
 
   def __repr__(self) -> str:
     messages_repr = "\n".join([message.__repr__() for message in self.messages])

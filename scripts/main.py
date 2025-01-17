@@ -1,8 +1,11 @@
-from datetime import datetime
 import os
+import random
+import subprocess
 import sys
+import time
 from argparse import ArgumentParser
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
 
@@ -12,6 +15,8 @@ from loguru._defaults import LOGURU_FORMAT
 from openai import OpenAI
 
 import docker
+import docker.errors
+import docker.models.containers
 from src.agent import save_agent_data, save_list_of_agent_data
 from src.agent.EnvAgent import EnvAgent
 from src.agent.StrategyAgent import StrategyAgent
@@ -36,6 +41,8 @@ from src.prep import (
 )
 from src.types import Message, TaggedMessage
 
+os.environ["TZ"] = "Asia/Jakarta"
+
 # Load environment variables
 load_dotenv()
 
@@ -44,10 +51,11 @@ EA_MAX_ATTEMPTS = 5
 EA_MAX_SP_EGC = 2
 CA_MAX_ATTEMPTS = 3
 
-FEDORA_CONTAINER_ID = "fedora-learn-compose"
+MAIN_CONTAINER_ID = "fedora-learn-compose"
 TEST_CONTAINER_ID = "mini-learn-compose"
 BACKEND = "qwen"
 OAI_API_KEY = os.getenv("OPENAI_API_KEY")
+CUR_DATETIME = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 
 
 def setup_logger(debug: bool) -> None:
@@ -57,10 +65,22 @@ def setup_logger(debug: bool) -> None:
   Args:
       debug (bool): Whether to enable debug mode.
   """
-  log_format = str(LOGURU_FORMAT)
+  os.environ["TZ"] = "Asia/Jakarta"
+  log_format = str(LOGURU_FORMAT).replace(
+    "{time:YYYY-MM-DD HH:mm:ss.SSS}",
+    "{time:YYYY-MM-DD HH:mm:ss.SSS ZZ}",
+  )
+
   logger.remove()
   logger.add(
     sys.stderr,
+    backtrace=debug,
+    diagnose=debug,
+    format=log_format,
+    level="DEBUG" if debug else "INFO",
+  )
+  logger.add(
+    f"logs/main_logs/main_{CUR_DATETIME}.log",
     backtrace=debug,
     diagnose=debug,
     format=log_format,
@@ -70,14 +90,16 @@ def setup_logger(debug: bool) -> None:
 
 def log_environment_variables() -> None:
   """Log the environment variables used in the script."""
-  logger.info("Environment Variables:")
-  logger.info(f"EA_MAX_ATTEMPTS: {EA_MAX_ATTEMPTS}")
-  logger.info(f"EA_MAX_SP_EGC: {EA_MAX_SP_EGC}")
-  logger.info(f"CA_MAX_ATTEMPTS: {CA_MAX_ATTEMPTS}")
-  logger.info(f"FEDORA_CONTAINER_ID: {FEDORA_CONTAINER_ID}")
-  logger.info(f"TEST_CONTAINER_ID: {TEST_CONTAINER_ID}")
-  logger.info(f"BACKEND: {BACKEND}")
-  logger.info(f"OAI_API_KEY: {'Set' if OAI_API_KEY else 'Not set'}")
+  log_data = {
+    "EA_MAX_ATTEMPTS": EA_MAX_ATTEMPTS,
+    "EA_MAX_SP_EGC": EA_MAX_SP_EGC,
+    "CA_MAX_ATTEMPTS": CA_MAX_ATTEMPTS,
+    "MAIN_CONTAINER_ID": MAIN_CONTAINER_ID,
+    "TEST_CONTAINER_ID": TEST_CONTAINER_ID,
+    "BACKEND": BACKEND,
+    "OAI_API_KEY": OAI_API_KEY,
+  }
+  logger.info(f"Environment Variables: {log_data}")
 
 
 def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner, Genner]:
@@ -95,10 +117,9 @@ def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner, Genner]:
   genner = get_genner(BACKEND, oai_client=oai_client)
   backup_genner = get_genner("oai", oai_client=oai_client)
 
-  logger.info("Clients initialized:")
-  logger.info(f"oai_client: {oai_client}")
-  logger.info(f"docker_client: {docker_client}")
-  logger.info(f"genner: {genner}")
+  logger.info(
+    f"Clients initialized: {oai_client}, {docker_client}, {genner}, {backup_genner}"
+  )
 
   return oai_client, docker_client, genner, backup_genner
 
@@ -123,14 +144,18 @@ def main(
   prev_strats = scan_json_files_for_strat(save_folder)
   in_con_path = Path("/")
 
-  logger.info(f"save_folder: {save_folder}")
-  logger.info(f"prev_strats: {prev_strats}")
-  logger.info(f"in_con_path: {in_con_path}")
+  log_data = {
+    "save_folder": save_folder,
+    "prev_strats": prev_strats,
+    "in_con_path": in_con_path,
+  }
+  logger.info(f"Log data: {log_data}")
 
   timed_input("Enter to continue or wait 3 seconds...")
 
   # Initialize environment agent
   logger.info("Initializing basic environment info.")
+
   initial_basic_env_info: EnvironmentInfo = safe_detect_env(
     docker_client, main_container_id
   )
@@ -169,40 +194,32 @@ def main(
   ea.sp_env_info_history.append(initial_special_env_infos)
 
   # Initialize common agent
-  ca = StrategyAgent(
+  main_ca = StrategyAgent(
     init_bs_env_info_history=ea.bs_env_info_history,
     init_sp_env_info_history=ea.sp_env_info_history,
     prev_strats=prev_strats,
     in_con_path=in_con_path,
   )
 
-  new_tch = ca.get_initial_tch()
-  logger.debug(f"EA - New TCH -\n{format_tch(new_tch)}")
-  ca.tagged_chat_history.messages.extend(new_tch.messages)
+  new_tch = main_ca.get_initial_tch()
+  logger.debug(f"SA - New TCH -\n{format_tch(new_tch)}")
+  main_ca.tagged_chat_history.messages.extend(new_tch.messages)
 
   # Generate strategies based on the new environment info
-  ca.strats, raw_strats = ca.gen_strats(genner)
+  new_tch, main_ca.strats, strats_str = main_ca.gen_strats(genner, BACKEND)
+  logger.debug(f"SA - New TCH -\n{format_tch(new_tch)}")
 
-  if debug:
-    ca.strats = ["Clean up temporary files with commands like `rm -rf /tmp/*`."]
-    raw_strats = str(ca.strats)
-
-  ca.tagged_chat_history.messages.append(
-    TaggedMessage(
-      message=Message(role="assistant", content=f"```python\nlist = {raw_strats}\n```"),
-      tag="gen_strats",
-    )
-  )
+  main_ca.tagged_chat_history.messages.extend(new_tch.messages)
 
   total_space_freed = 0
   total_success = 0
   list_of_ca: List[StrategyAgent] = []
   # Process each strategy
-  for i, strat in enumerate(ca.strats):
+  for i, strat in enumerate(main_ca.strats):
     space_freed, strat_local_ca = process_strategy(
       strat=strat,
       i=i,
-      ca=ca,
+      ca=main_ca,
       ea=ea,
       docker_client=docker_client,
       genner=genner,
@@ -214,21 +231,25 @@ def main(
     total_success += 1 if space_freed > 0 else 0
 
     strat_local_ca.chosen_strat = strat
+    strat_local_ca.space_freed = space_freed
 
     list_of_ca.append(strat_local_ca)
 
   timedate = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
   save_path = save_folder / f"full_agent_data_{timedate}.json"
 
+  main_ca.tagged_chat_history.messages.extend(new_tch.messages)
+
   save_list_of_agent_data(
-    strat_agents=list_of_ca,
+    main_strat_agent=main_ca,
+    copy_strat_agents=list_of_ca,
     env_agent=ea,
     space_freed=total_space_freed,
     save_path=save_path,
   )
 
   logger.info(
-    f"{total_success} successful strats across {len(ca.strats)} strats, {total_space_freed} space freed across {len(ca.strats)} strats"
+    f"{total_success} successful strats across {len(main_ca.strats)} strats, {total_space_freed} space freed across {len(main_ca.strats)} strats"
   )
 
 
@@ -256,7 +277,7 @@ def process_strategy(
       test_container_id (str): ID of the test Docker container.
       save_folder (Path): The folder to save data.
   """
-  logger.info(f"CA - {i}-th strat - Code loop started on strat {strat}...")
+  logger.info(f"SA - {i}-th strat - Code loop started on strat {strat}...")
   strat_local_ca = deepcopy(ca)
 
   # Get fresh environment info
@@ -273,7 +294,7 @@ def process_strategy(
     ea.bs_env_info_history, ea.sp_env_info_history
   )
   logger.info(
-    f"CA - {i}-th strat - Number of updates on common agent env info's state {changes}"
+    f"SA - {i}-th strat - Number of updates on common agent env info's state {changes}"
   )
 
   # Prepare the common agent chat history with prep prompts
@@ -290,7 +311,16 @@ def process_strategy(
       f"StrategyAgent's in loop chat history tag - \n{strat_local_ca.tagged_chat_history.messages}"
     )
 
-    code, raw_response = genner.generate_code(strat_local_ca.chat_history)
+    list_of_problems, code, raw_response = genner.generate_code(
+      strat_local_ca.chat_history
+    )
+
+    if len(list_of_problems) > 0:
+      logger.error(
+        f"SA - {i}-th strat - {attempt}-th attempt - Failed to generate code. Local strat agent chat history tags: {strat_local_ca.tagged_chat_history.get_tags()}"
+      )
+      attempt += 1
+      continue
 
     if not validate_and_run_code(
       code, docker_client, test_container_id, strat_local_ca, strat, i, attempt
@@ -306,11 +336,11 @@ def process_strategy(
     code_diffs: List[str] = get_code_diff(code, reflected_code)
 
     if len(code_diffs) > 0:
-      logger.warning("CA - Generated code and in container are different.")
+      logger.warning("SA - Generated code and in container are different.")
       for diff in code_diffs:
-        logger.warning(f"CA - {diff}")
+        logger.warning(f"SA - {diff}")
     else:
-      logger.info("CA - Generated code and in container are the same.")
+      logger.info("SA - Generated code and in container are the same.")
 
     fresh_basic_env_info = safe_detect_env(docker_client, main_container_id)
     space_freed, files_deleted = loop_bs_env_info.get_total_files_deleted(
@@ -319,16 +349,16 @@ def process_strategy(
 
     if not files_deleted:
       logger.error(
-        f"CA - {i}-th strat - {attempt + 1}-th attempt - "
+        f"SA - {i}-th strat - {attempt + 1}-th attempt - "
         f"No spaces are freed \n{execution_output}"
       )
-      logger.debug(f"CA - Code is \n{code[:100]}...")
-      logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
+      logger.debug(f"SA - Code is \n{code[:100]}...")
+      logger.debug(f"SA - In Container Code is \n{reflected_code[:100]}...")
 
       strat_local_ca.tagged_chat_history.messages.append(
         TaggedMessage(
           message=Message(role="assistant", content=f"```python\n{code}\n```"),
-          tag="strat_codegen(deletion_fail)",
+          tag="genned_strat_code(deletion_fail)",
         )
       )
       strat_local_ca.tagged_chat_history.messages.extend(
@@ -345,20 +375,21 @@ def process_strategy(
     break
 
   if attempt >= CA_MAX_ATTEMPTS:
-    logger.info(f"CA - {i}-th strat - Codegen loop ended up in failure")
+    logger.info(f"SA - {i}-th strat - Codegen loop ended up in failure")
   else:
-    logger.info(f"CA - {i}-th strat - Codegen loop ended up in success")
+    logger.info(f"SA - {i}-th strat - Codegen loop ended up in success")
     strat_local_ca.tagged_chat_history.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
-        tag="strat_codegen(success)",
+        tag="genned_strat_code(success)",
       )
     )
 
-  logger.debug(f"CA - {i}-th strat - Code is \n{code[:100]}...")
+  logger.debug(f"SA - {i}-th strat - Code is \n{code[:100]}...")
 
-  logger.info(f"Code loop is done for the strat {strat} on {attempt}-th iteration.")
-  logger.info("Continuing to next strat if exists...")
+  logger.info(
+    f"Code loop is done for the strat {strat} on {attempt}-th iteration. Continuing to next strat if exists..."
+  )
 
   return space_freed, strat_local_ca
 
@@ -392,14 +423,14 @@ def validate_and_run_code(
 
   if not ast_valid:
     logger.error(
-      f"CA - {i}-th strat - {attempt + 1}-th attempt - " f"AST error \n{ast_error}"
+      f"SA - {i}-th strat - {attempt + 1}-th attempt - " f"AST error \n{ast_error}"
     )
-    logger.debug(f"CA - Code is \n{code[:100]}...")
+    logger.debug(f"SA - Code is \n{code[:100]}...")
 
     copy_ca.tagged_chat_history.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
-        tag="strat_codegen(ast_fail)",
+        tag="genned_strat_code(ast_fail)",
       )
     )
     copy_ca.tagged_chat_history.messages.extend(
@@ -414,15 +445,15 @@ def validate_and_run_code(
   compile_valid, compiler_error = is_valid_code_compiler(code)
   if not compile_valid:
     logger.error(
-      f"CA - {i}-th strat - {attempt + 1}-th attempt - "
+      f"SA - {i}-th strat - {attempt + 1}-th attempt - "
       f"Native `compile` error \n{compiler_error}"
     )
-    logger.debug(f"CA - Code is \n{code[:100]}...")
+    logger.debug(f"SA - Code is \n{code[:100]}...")
 
     copy_ca.tagged_chat_history.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
-        tag="strat_codegen(compile_fail)",
+        tag="genned_strat_code(compile_fail)",
       )
     )
     copy_ca.tagged_chat_history.messages.extend(
@@ -438,16 +469,16 @@ def validate_and_run_code(
 
   if exit_code != 0:
     logger.error(
-      f"CA - {i}-th strat - {attempt + 1}-th attempt - "
+      f"SA - {i}-th strat - {attempt + 1}-th attempt - "
       f"In container error \n{execution_output}"
     )
-    logger.debug(f"CA - Code is \n{code[:100]}...")
-    logger.debug(f"CA - In Container Code is \n{reflected_code[:100]}...")
+    logger.debug(f"SA - Code is \n{code[:100]}...")
+    logger.debug(f"SA - In Container Code is \n{reflected_code[:100]}...")
 
     copy_ca.tagged_chat_history.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
-        tag="strat_codegen(container_fail)",
+        tag="genned_strat_code(container_fail)",
       )
     )
     copy_ca.tagged_chat_history.messages.extend(
@@ -461,15 +492,15 @@ def validate_and_run_code(
 
   if execution_output.strip() == "":
     logger.error(
-      f"CA - {i}-th strat - {attempt + 1}-th attempt - "
+      f"SA - {i}-th strat - {attempt + 1}-th attempt - "
       f"The code doesnt return any output"
     )
-    logger.debug(f"CA - Code is \n{code[:100]}...")
+    logger.debug(f"SA - Code is \n{code[:100]}...")
 
     copy_ca.tagged_chat_history.messages.append(
       TaggedMessage(
         message=Message(role="assistant", content=f"```python\n{code}\n```"),
-        tag="strat_codegen(container_fail)",
+        tag="genned_strat_code(container_fail)",
       )
     )
     copy_ca.tagged_chat_history.messages.extend(
@@ -484,22 +515,59 @@ def validate_and_run_code(
   return True
 
 
+def wait_for_container(
+  container_name: str, timeout: int = 30
+) -> docker.models.containers.Container:
+  """Wait for container to be fully running and return the container object."""
+  client = docker.from_env()
+  start_time = time.time()
+
+  while time.time() - start_time < timeout:
+    try:
+      container = client.containers.get(container_name)
+      container.reload()
+
+      if container.status == "running":
+        # Test if container is truly ready by running a simple command
+        exit_code, output = container.exec_run("ps aux")
+        if exit_code == 0:
+          logger.info(f"Container {container_name} is fully running")
+          return container
+
+      logger.debug(f"Container status: {container.status}, waiting...")
+      time.sleep(1)
+
+    except docker.errors.NotFound:
+      logger.debug(f"Container {container_name} not found yet, waiting...")
+      time.sleep(1)
+      continue
+
+  raise TimeoutError(
+    f"Container {container_name} did not start properly within {timeout} seconds"
+  )
+
+
 if __name__ == "__main__":
   parser = ArgumentParser(add_help=False)
   parser.add_argument("-d", "--debug", action="store_true")
   parser.add_argument("-as", "--always-success", action="store_true")
   args = parser.parse_args()
 
-  main_container_id = (
-    "fedora-learn-compose"
-    if "fedora" == os.getenv("CONTAINER", "fedora")
-    else "debian-learn-compose-dev"
-  )
-  test_container_id = "mini-learn-compose"
+  try:
+    subprocess.run(["python", "scripts/container_launcher.py"])
 
-  main(
-    debug=args.debug,
-    always_success=args.always_success,
-    main_container_id=main_container_id,
-    test_container_id=test_container_id,
-  )
+    main_container_id = "learn-container"
+    test_container_id = "learn-container"
+
+    wait_for_container(main_container_id)
+
+    main(
+      debug=args.debug,
+      always_success=args.always_success,
+      main_container_id=main_container_id,
+      test_container_id=test_container_id,
+    )
+  except Exception as e:
+    raise e
+
+  # os.system("docker rm -f learn-container")

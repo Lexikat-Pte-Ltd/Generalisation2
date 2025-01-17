@@ -443,7 +443,7 @@ def get_code_regen_plist(
   Get a plist for code regeneration.
 
   ```
-  On StrategyAgent and EnvAgent :
+  On StrategyAgent and StrategyAgent :
   [
       ...,
       ({"role": "user", "content": "..."}, "*REQ*"),

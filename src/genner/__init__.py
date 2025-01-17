@@ -66,6 +66,9 @@ def get_genner(
     return DeepseekGenner(deepseek_config)
   elif backend == "qwen":
     return QwenGenner(qwen_config)
+  elif backend == "qwen-uncensored":
+    qwen_config.model = "qwen-uncensored:latest"
+    return QwenGenner(qwen_config)
   elif backend == "wizardcoder":
     return WizardCoderGenner(wizard_config)
   elif backend == "oai":

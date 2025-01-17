@@ -234,11 +234,13 @@ dependencies = [
     { name = "openai" },
     { name = "pip" },
     { name = "plotext" },
+    { name = "polars" },
     { name = "prometheus-client" },
     { name = "psutil" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "schedule" },
     { name = "transformers" },
     { name = "unidecode" },
 ]
@@ -255,11 +257,13 @@ requires-dist = [
     { name = "openai" },
     { name = "pip", specifier = ">=24.3.1" },
     { name = "plotext" },
+    { name = "polars", specifier = ">=1.19.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "psutil" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "schedule", specifier = ">=1.2.2" },
     { name = "transformers", specifier = ">=4.47.1" },
     { name = "unidecode", specifier = ">=1.3.8" },
 ]
@@ -602,6 +606,20 @@ wheels = [
 ]
 
 [[package]]
+name = "polars"
+version = "1.19.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/d9/66ada2204483c4c4d83898ade77eacd5fbef26ae4975a0d7d5de134ca46a/polars-1.19.0.tar.gz", hash = "sha256:b52ada5c43fcdadf64f282522198c5549ee4e46ea57d236a4d7e572643070d9d", size = 4267947 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/7d/e8645281281d44d96752443366ceef2df76c9c1e17dce040111abb6a4a12/polars-1.19.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:51c01837268a1aa41785e60ed7d3363d4b52f652ab0eef4981f887bdfa2e9ca7", size = 29472039 },
+    { url = "https://files.pythonhosted.org/packages/d7/fb/7e5054598d6bb7a47e4ca086797bae61270f7d570350cf779dd97384d913/polars-1.19.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:20f8235e810f6ee795d7a215a3560945e6a1b57d017f87ba0c8542dced1fc665", size = 26150541 },
+    { url = "https://files.pythonhosted.org/packages/ba/ba/6d715730c28b035abd308fc2cf0fcbae0cedea6216797e83ce4a9a96c6d4/polars-1.19.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:be0ea51f7b3553652bf0d53f3b925e969a898d4feb9980acecf8e3037d696903", size = 32751173 },
+    { url = "https://files.pythonhosted.org/packages/ea/9a/bee8ab37ab82b8eea75170afa3b37ea7e1df74e4c4da8f6c93b3009977fd/polars-1.19.0-cp39-abi3-manylinux_2_24_aarch64.whl", hash = "sha256:30305ef4e1b634c67a5d985832296fade9908482c5b1abb0100800808b2d090e", size = 29704437 },
+    { url = "https://files.pythonhosted.org/packages/57/ec/74afa5699e37e03e3acc7f241f4e2c3e8c91847524005424d9cf038b3034/polars-1.19.0-cp39-abi3-win_amd64.whl", hash = "sha256:de4aa45e24f8f94a1da9cc6031a7db6fa65ac7de8246fac0bc581ebb427d0643", size = 32846039 },
+    { url = "https://files.pythonhosted.org/packages/cf/5b/c6f6c70ddc9d3070dee65f4640437cb84ccb4cca04f7a81b01db15329ae3/polars-1.19.0-cp39-abi3-win_arm64.whl", hash = "sha256:d7ca7aeb63fa22c0a00f6cfa95dd5252c249e83dd4d1b954583a59f97a8e407b", size = 29029208 },
+]
+
+[[package]]
 name = "prometheus-client"
 version = "0.21.0"
 source = { registry = "https://pypi.org/simple" }
@@ -921,6 +939,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/79/9608c4546cdbfe3860dd7aa59e3562c9289113398b1a0bd89b68ce0a9d41/safetensors-0.4.5-pp310-pypy310_pp73-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:6ac85d9a8c1af0e3132371d9f2d134695a06a96993c2e2f0bbe25debb9e3f67a", size = 457316 },
     { url = "https://files.pythonhosted.org/packages/0f/23/b17b483f2857835962ad33e38014efd4911791187e177bc23b057d35bee8/safetensors-0.4.5-pp310-pypy310_pp73-musllinux_1_1_aarch64.whl", hash = "sha256:e3cec4a29eb7fe8da0b1c7988bc3828183080439dd559f720414450de076fcab", size = 620565 },
     { url = "https://files.pythonhosted.org/packages/19/46/5d11dc300feaad285c2f1bd784ff3f689f5e0ab6be49aaf568f3a77019eb/safetensors-0.4.5-pp310-pypy310_pp73-musllinux_1_1_x86_64.whl", hash = "sha256:21742b391b859e67b26c0b2ac37f52c9c0944a879a25ad2f9f9f3cd61e7fda8f", size = 606660 },
+]
+
+[[package]]
+name = "schedule"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/91/b525790063015759f34447d4cf9d2ccb52cdee0f1dd6ff8764e863bcb74c/schedule-1.2.2.tar.gz", hash = "sha256:15fe9c75fe5fd9b9627f3f19cc0ef1420508f9f9a46f45cd0769ef75ede5f0b7", size = 26452 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/a7/84c96b61fd13205f2cafbe263cdb2745965974bdf3e0078f121dfeca5f02/schedule-1.2.2-py3-none-any.whl", hash = "sha256:5bef4a2a0183abf44046ae0d164cadcac21b1db011bdd8102e4a0c1e91e06a7d", size = 12220 },
 ]
 
 [[package]]

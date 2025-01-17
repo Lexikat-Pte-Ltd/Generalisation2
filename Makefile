@@ -13,6 +13,9 @@ MINI_DIR := ./docker/mini-learn-compose
 FEDORA_DIR := ./docker/fedora-learn-compose
 CONTAINER ?= mini
 
+# Tmux related
+SESSION_NAME := learn-compose
+
 # Set the appropriate directory based on the container type
 ifeq ($(CONTAINER),mini)
     DOCKER_DIR := $(MINI_DIR)
@@ -28,12 +31,22 @@ endif
 debug-mode: mini-up-container fedora-up-container
 full-rund: mini-up-container fedora-up-container run-maind
 full-run: mini-up-container fedora-up-container run-main
+full-loop: mini-up-container fedora-up-container run-loop
 
 run-main: 
 	python scripts/main.py
 
 run-maind: 
 	python scripts/main.py --debug
+
+run-loop:
+	@if tmux has-session -t $(SESSION_NAME) 2>/dev/null; then \
+		echo "Attaching to existing loop session: $(SESSION_NAME)"; \
+		tmux attach-session -t $(SESSION_NAME); \
+	else \
+		echo "Creating new loop session: $(SESSION_NAME)"; \
+		tmux new-session -s $(SESSION_NAME) "./scripts/infinite_run.sh"; \
+	fi
 
 # Container-specific rules
 mini-up-container:

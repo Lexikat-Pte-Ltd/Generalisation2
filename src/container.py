@@ -12,6 +12,7 @@ from loguru import logger
 import docker
 from docker import DockerClient
 from docker.models.containers import Container
+from src.helper import timeout
 from src.data import EnvironmentInfo
 
 
@@ -98,67 +99,66 @@ def parse_meminfo(meminfo_str: str) -> dict:
   return mem_info
 
 
+def get_memory_info_docker_stats(client: DockerClient, container_id: str) -> dict:
+  """Get memory info using docker stats"""
+  container = client.containers.get(container_id)
+  stats = container.stats(stream=False)
+
+  # Get memory stats in MB
+  total_memory = stats["memory_stats"].get("limit", 0) // (1024 * 1024)
+  used_memory = stats["memory_stats"].get("usage", 0) // (1024 * 1024)
+  available_memory = total_memory - used_memory
+
+  return {"total": total_memory, "available": available_memory, "used": used_memory}
+
+
+def get_storage_info(container) -> Tuple[int, int]:
+  """Get storage information from container"""
+  try:
+    exit_code, output = container.exec_run("df -m /")
+
+    if exit_code == 0 and isinstance(output, bytes):
+      lines = output.decode().splitlines()
+      storage_info = lines[1].split()
+      total = int(storage_info[1])  # MB
+      available = int(storage_info[3])  # MB
+      return total, available
+    else:
+      raise Exception("Failed to retrieve storage information caused by `df -m /`")
+  except Exception as e:
+    logger.debug(f"Storage info retrieval failed: {e}")
+    raise e
+
+
 def safe_detect_env(client: DockerClient, container_id: str) -> EnvironmentInfo:
-  container = safe_container_get(client, container_id)
+  """Safely detect container environment info"""
+  try:
+    container = client.containers.get(container_id)
 
-  # Get memory info from /proc/meminfo
-  exit_code, output = container.exec_run(cmd="cat /proc/meminfo")
+    # Get memory info
+    mem_info = get_memory_info_docker_stats(client, container_id)
 
-  if exit_code != 0 or not isinstance(output, bytes):
-    logger.error(
-      f"safe_detect_env {client.api.base_url} {container_id[:10]} - reading meminfo failed"
+    # Get storage info
+    total_storage, available_storage = get_storage_info(container)
+
+    env_info = EnvironmentInfo(
+      total_system_memory=mem_info["total"],
+      available_system_memory=mem_info["available"],
+      running_memory=mem_info["used"],
+      total_storage=total_storage,
+      available_storage=available_storage,
     )
-    raise ValueError("Reading meminfo failed")
 
-  mem_info = parse_meminfo(output.decode())
-
-  # Get relevant memory values in MB
-  total_system_memory = mem_info["MemTotal"]
-  available_system_memory = mem_info["MemAvailable"]
-  running_memory = total_system_memory - available_system_memory
-
-  # Additional useful memory info for debugging
-  logger.debug(f"Memory Info (MB):")
-  logger.debug(f"  Total: {total_system_memory}")
-  logger.debug(f"  Available: {available_system_memory}")
-  logger.debug(f"  Used: {running_memory}")
-  logger.debug(f"  Cached: {mem_info['Cached']}")
-  logger.debug(f"  Buffers: {mem_info['Buffers']}")
-  logger.debug(f"  Swap Total: {mem_info['SwapTotal']}")
-
-  # Get storage information
-  exit_code, output = container.exec_run(cmd="df -m /")
-
-  if exit_code != 0 or not isinstance(output, bytes):
-    logger.error(
-      f"safe_detect_env {client.api.base_url} {container_id[:10]} - `df -m /` failed"
-    )
-    raise ValueError("`df -m /` failed")
-
-  lines = output.decode().splitlines()
-  storage_info = lines[1].split()
-
-  total_storage = int(storage_info[1])
-  available_storage = int(storage_info[3])
-
-  env_info = EnvironmentInfo(
-    # From `free -m`
-    total_system_memory=total_system_memory,
-    available_system_memory=available_system_memory,
-    running_memory=running_memory,
-    # From `df -m /`
-    total_storage=total_storage,
-    available_storage=available_storage,
-  )
-
-  logger.debug(
-    f"safe_detect_env {client.api.base_url} {container_id[:10]} = {env_info}"
-  )
-
-  return env_info
+    logger.debug(f"Container {container_id[:12]} environment info: {env_info}")
+    return env_info
+  except Exception as e:
+    logger.error(f"Error detecting environment for container {container_id[:12]}: {e}")
+    raise e
 
 
-def write_code_in_con(container: Container, code: str, type: str) -> Tuple[str, str]:
+def write_code_in_con(
+  container: Container, code: str, type: str, base_path: str = "/"
+) -> Tuple[str, str]:
   """Write code into a temporary file in the host machine first then to the container.
 
   Algorithm:
@@ -171,16 +171,18 @@ def write_code_in_con(container: Container, code: str, type: str) -> Tuple[str, 
       container (Container): The container to write the code into
       code (str): The code to write into the container
       type (str): The type of the agent
-
+      base_path (str): The base path to write the code into
   Raises:
       Exception: If the file does not exist in the container
 
   Returns:
       str: The path to the temporary file in the container
+      str: The reflected code
   """
   # Create temp file name with timestamp
   current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
   temp_file_name = f"temp_script_{current_time}.py"
+  temp_file_path = f"{base_path}/{temp_file_name}"
 
   # Create host file path and ensure directory exists
   logger.info(f"Writing file {temp_file_name} into host machine")
@@ -196,14 +198,14 @@ def write_code_in_con(container: Container, code: str, type: str) -> Tuple[str, 
 
   # Copy the file to the container's root directory
   logger.info(f"Writing file {temp_file_name} into container")
-  succeed = container.put_archive(path="/", data=tar_stream.read())
+  succeed = container.put_archive(path=base_path, data=tar_stream.read())
 
   if not succeed:
     raise Exception("Failed to write code into the container")
 
   # Check if file exists in container
   check_exist_command = (
-    f"test -f /{temp_file_name} && echo 'File exists' || echo 'File does not exist'"
+    f"test -f {temp_file_path} && echo 'File exists' || echo 'File does not exist'"
   )
   check_exist_result = container.exec_run(cmd=["/bin/sh", "-c", check_exist_command])
 
@@ -216,12 +218,12 @@ def write_code_in_con(container: Container, code: str, type: str) -> Tuple[str, 
     )
 
   # Read the file content
-  reflected_code = container.exec_run(cmd=["cat", f"/{temp_file_name}"]).output.decode(
+  reflected_code = container.exec_run(cmd=["cat", temp_file_path]).output.decode(
     "utf-8"
   )
   assert isinstance(reflected_code, str)
 
-  return temp_file_name, reflected_code
+  return temp_file_path, reflected_code
 
 
 def run_code_in_con(container: Container, code: str, type: str) -> Tuple[int, str, str]:
@@ -248,14 +250,21 @@ def run_code_in_con(container: Container, code: str, type: str) -> Tuple[int, st
   temp_file_name, reflected_code = write_code_in_con(container, code, type)
 
   command = ["python", "-u", temp_file_name, "2>&1"]
-  python_exit_code, python_output = cast(
-    Tuple[int, bytes],
-    container.exec_run(
-      cmd=command,
-      demux=False,  # Combine stdout and stderr
-      stream=False,  # Wait for the command to finish and return all output at once
-    ),
-  )
+  try:
+    with timeout(seconds=150):
+      python_exit_code, python_output = cast(
+        Tuple[int, bytes],
+        container.exec_run(
+          cmd=command,
+          demux=False,  # Combine stdout and stderr
+          stream=False,  # Wait for the command to finish and return all output at once
+        ),
+      )
+  except TimeoutError as e:
+    container.exec_run(cmd="kill -9 $(pidof python)")
+    return -1, str(e), ""
+  except docker.errors.ContainerError as e:
+    return -1, str(e), ""
 
   if python_exit_code != 0:
     logger.error(
@@ -268,6 +277,37 @@ def run_code_in_con(container: Container, code: str, type: str) -> Tuple[int, st
     python_output.decode("utf-8", errors="replace"),
     reflected_code,
   )
+
+
+def run_bash_in_con(container: Container, command: str) -> Tuple[int, str]:
+  """Run bash command in container and return the exit code and output.
+
+  Args:
+    container (Container): The container to run the bash command in
+    command (str): The bash command to run in the container
+
+  Returns:
+    int: The exit code
+    str: The output
+  """
+  try:
+    with timeout(seconds=150):
+      exit_code, output = cast(
+        Tuple[int, bytes],
+        container.exec_run(cmd=command, demux=False, stream=False),
+      )
+  except TimeoutError as e:
+    return -1, str(e)
+  except docker.errors.ContainerError as e:
+    return -1, str(e)
+
+  if exit_code != 0:
+    return (
+      exit_code,
+      f"Command {command} failed: {output.decode('utf-8', errors='replace')}",
+    )
+
+  return exit_code, output.decode("utf-8", errors="replace")
 
 
 def repopulate_container(

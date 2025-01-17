@@ -1,20 +1,23 @@
 import difflib
 import json
+import random
 import re
 import select
 import shutil
-from pathlib import Path
+import signal
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 from typing import Dict, List, Sequence
 
-from unidecode import unidecode
 import yaml
+from unidecode import unidecode
 
 from src.data import EnvironmentInfo
 from src.types import PList, TaggedPList
 
 
-def scan_json_files_for_strat(folder_path):
+def scan_json_files_for_strat(folder_path) -> List[str]:
   strat_list = []
   folder = Path(folder_path)
 
@@ -25,12 +28,17 @@ def scan_json_files_for_strat(folder_path):
         data = json.load(file)
 
         # Check if 'strat' key exists directly in the JSON data
-        if "chosen_strat" in data:
-          strat_list.append(data["chosen_strat"])
+        if "main_strat_agent" in data:
+          if "strats" in data["main_strat_agent"]:
+            strat_list.extend(data["main_strat_agent"]["strats"])
+
     except json.JSONDecodeError:
       print(f"Error decoding JSON in file: {file_path.name}")
     except IOError:
       print(f"Error reading file: {file_path.name}")
+
+  if len(strat_list) > 10:
+    strat_list = random.sample(strat_list, 10)
 
   return strat_list
 
@@ -242,3 +250,24 @@ def timed_input(prompt, timeout=3):
   else:
     print("\nContinuing...")
     return None
+
+
+class TimeoutError(Exception):
+  pass
+
+
+@contextmanager
+def timeout(seconds: int):
+  def timeout_handler(signum, frame):
+    raise TimeoutError(f"Execution timed out after {seconds} seconds")
+
+  # Set the timeout handler
+  original_handler = signal.signal(signal.SIGALRM, timeout_handler)
+  signal.alarm(seconds)
+
+  try:
+    yield
+  finally:
+    # Restore the original handler and cancel the alarm
+    signal.alarm(0)
+    signal.signal(signal.SIGALRM, original_handler)

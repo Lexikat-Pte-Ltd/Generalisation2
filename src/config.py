@@ -23,6 +23,8 @@ class WizardCoderConfig(OllamaConfig):
 class QwenConfig(OllamaConfig):
   name: str = "Ollama Qwen"
   model: str = "qwen2.5-coder:latest"
+  model_uncensored: str = "qwen-uncensored:latest"
+
   stream: bool = False
 
 class OAIConfig(NamedTuple):

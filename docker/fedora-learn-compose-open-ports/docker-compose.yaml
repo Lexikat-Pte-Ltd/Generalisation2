@@ -1,0 +1,21 @@
+services:
+  dev:
+    container_name: fedora-learn-compose
+    hostname: fedora-learn-compose
+    tty: true
+    build:
+      context: .
+      dockerfile: Dockerfile.fedora-learn
+    volumes:
+      - /bin/df:/usr/bin/df:ro
+      - /bin/du:/usr/bin/du:ro
+      - /bin/free:/usr/bin/free:ro
+
+  # target:
+  #   build: ./target
+  #   hostname: target
+
+  # emulator:
+  #   image: us-docker.pkg.dev/android-emulator-268719/images/26-aosp-x64
+  #   devices:
+  #     - "/dev/kvm"
