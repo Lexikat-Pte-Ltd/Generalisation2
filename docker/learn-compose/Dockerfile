@@ -1,4 +1,4 @@
-FROM wordpress:6-apache
+FROM php:8.1-fpm
 RUN apt-get update && apt-get install -y bash openssl openssh-server openssh-client python3 python3-pip python3-venv python3-dev gcc linux-headers-generic procps coreutils util-linux && rm -rf /var/lib/apt/lists/*
 RUN useradd -m -s /bin/bash alice
 ENV VIRTUAL_ENV=/home/alice/venv

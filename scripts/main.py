@@ -53,7 +53,7 @@ CA_MAX_ATTEMPTS = 3
 
 MAIN_CONTAINER_ID = "fedora-learn-compose"
 TEST_CONTAINER_ID = "mini-learn-compose"
-BACKEND = "qwen"
+BACKEND = "qwen-0c68278e2d-25-01-22"
 OAI_API_KEY = os.getenv("OPENAI_API_KEY")
 CUR_DATETIME = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
 

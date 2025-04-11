@@ -58,7 +58,7 @@ def job():
           f"Process completed successfully. Log length: {len(stdout.splitlines())}"
         )
         if stdout.splitlines():
-          logger.info(f"Last log: {stdout.splitlines()[-1]}")
+          logger.info(f"Last log: {stdout.splitlines()[-1].splitlines()[-1]}")
       else:
         logger.error(
           f"Process failed with code {process.returncode}. " f"Error: {stderr}"

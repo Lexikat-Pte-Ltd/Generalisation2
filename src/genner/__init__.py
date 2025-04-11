@@ -37,6 +37,7 @@ def get_genner(
   qwen_config: QwenConfig = QwenConfig(),
   claude_config: ClaudeConfig = ClaudeConfig(),
   oai_client: OpenAI | None = None,
+  dream_client: OpenAI | None = None, 
   claude_client: Anthropic | None = None,
 ) -> Genner:
   """
@@ -68,6 +69,9 @@ def get_genner(
     return QwenGenner(qwen_config)
   elif backend == "qwen-uncensored":
     qwen_config.model = "qwen-uncensored:latest"
+    return QwenGenner(qwen_config)
+  elif backend == "qwen-0c68278e2d-25-01-22":
+    qwen_config.model = "qwen2.5-coder-7b-instruct-0c68278e2d-25-01-22:latest"
     return QwenGenner(qwen_config)
   elif backend == "wizardcoder":
     return WizardCoderGenner(wizard_config)
