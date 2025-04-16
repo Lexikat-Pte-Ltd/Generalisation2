@@ -10,7 +10,6 @@ from src.types import Message, PList, TaggedMessage
 
 from .Base import Genner
 
-
 class ClaudeGenner(Genner):
   def __init__(self, client: Anthropic, config: ClaudeConfig):
     self.client = client

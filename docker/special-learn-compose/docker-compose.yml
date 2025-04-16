@@ -1,0 +1,25 @@
+version: '3'
+
+services:
+  service-a:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine  # Assuming you saved the Dockerfile we created
+    networks:
+      - my-network
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+    
+  service-b:
+    build:
+      context: .
+      dockerfile: Dockerfile.alpine  # Assuming you saved the Dockerfile we created
+    networks:
+      - my-network
+    restart: unless-stopped
+    tty: true
+    stdin_open: true
+
+networks:
+  my-network:

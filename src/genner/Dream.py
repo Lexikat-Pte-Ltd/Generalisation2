@@ -3,7 +3,6 @@ from abc import abstractmethod
 from src.types import PList
 from typing import Tuple
 
-
 class DreamGenner(Genner):
     def __init__(self, identifier: str):
         self.identifier = identifier
