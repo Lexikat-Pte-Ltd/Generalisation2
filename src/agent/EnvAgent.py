@@ -180,6 +180,37 @@ class EnvAgent(BaseAgent):
             )
             local_tch = local_tch + new_tch
             sp_egc.append(env_getter_code)
+        
+        ssh_code = dedent("""
+		import subprocess
+
+		try:
+			result = subprocess.run(['ssh', '-v', 'alice@172.25.0.2'], capture_output=True, text=True, check=True)
+			print("Output of 'ssh -v alice@172.25.0.2':")
+			print(result.stdout)
+		except subprocess.CalledProcessError as e:
+			print(f"Error running 'ssh -v alice@172.25.0.2': {e}")
+		except FileNotFoundError:
+			print("Error: The 'nmap' command was not found. Make sure it's installed and in your system's PATH.")
+		""")
+
+        env_getter_code, succeed, new_tch = self.gen_single_sp_egc_(
+            "```\n" + ssh_code.strip() + "\n```",
+            ssh_code.strip(),
+            count=i,
+            genner=genner,
+            docker_client=docker_client,
+            testing_container_id=test_container_id,
+            model_name=model_name,
+            max_attempts=max_attempts,
+        )
+
+        if succeed:
+            logger.info(
+                f"EA - {i}-th SP EGC - Appending env_agent with new env getter code."
+            )
+            local_tch = local_tch + new_tch
+            sp_egc.append(env_getter_code)
 
         return local_tch, sp_egc
 
