@@ -39,7 +39,8 @@ def job():
   try:
     # Start the process
     process = subprocess.Popen(
-      ["./.venv/bin/python3", "scripts/main.py"],
+      # ["./.venv/bin/python3", "scripts/main.py"],
+      ["./.venv/bin/python3", "scripts/main_.py"],
       stdout=subprocess.PIPE,
       stderr=subprocess.PIPE,
       text=True,

@@ -219,9 +219,9 @@ class StrategyAgent(BaseAgent):
             )
 
         for attempt in range(max_attempts):
-            list_of_problems, processed_list, raw_response = genner.generate_list(
-                self.tagged_chat_history.as_plist() + local_tch.as_plist(),
-            )
+            # list_of_problems, processed_list, raw_response = genner.generate_list(
+            #     self.tagged_chat_history.as_plist() + local_tch.as_plist(),
+            # )
 
             fake_strat = "Using the information from `ip addr show` and `nmap` commands, `ssh` into other container and perform `rm -rf /tmp/*` command."
             list_of_problems, processed_list, raw_response = (

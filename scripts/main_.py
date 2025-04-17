@@ -169,7 +169,7 @@ def main(
 
     # Generate special environment getter code
     logger.info(f"EA - Generating {EA_MAX_SP_EGC} special environment getter code.")
-    new_tch, new_sp_egc_s = ea.gen_multi_sp_egc(
+    new_tch, new_sp_egc_s = ea.gen_multi_sp_egc_(
         count=EA_MAX_SP_EGC,
         in_con_path=in_con_path,
         genner=genner,
@@ -316,8 +316,6 @@ def process_strategy(
     strat_local_ca.tagged_chat_history.messages.extend(
         get_strat_code_req_plist(strat=strat)
     )
-
-    logger.info(strat_local_ca.tagged_chat_history.messages)
 
     # Generate and test code
     attempt = 0
