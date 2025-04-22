@@ -158,6 +158,16 @@ async def run_model_inference(
             input_ids = inputs.input_ids.to(device=device)  # type: ignore
             attention_mask = inputs.attention_mask.to(device=device)  # type: ignore
 
+            progression = []
+
+            def generation_tokens_hook_func(step, x, logits):
+                progression.append(
+                    tokenizer.decode(x[0].tolist())
+                    .split(tokenizer.eos_token)[0]
+                    .replace(tokenizer.mask_token, " "),
+                )
+                return x
+
             # Generate text
             output = model.diffusion_generate(  # type: ignore
                 input_ids,
@@ -170,6 +180,7 @@ async def run_model_inference(
                 top_p=top_p,
                 alg=alg,
                 alg_temp=alg_temp,
+                generation_tokens_hook_func=generation_tokens_hook_func,
             )
 
             # Process output
@@ -189,7 +200,7 @@ async def run_model_inference(
                 torch.cuda.empty_cache()
             gc.collect()
 
-            return result
+            return result, progression
 
         except Exception as e:
             failed_inference_count += 1
@@ -262,7 +273,7 @@ async def generate_text(request: GenerationRequest, background_tasks: Background
                             processing_start_time = time.time()
 
                             # Run the model inference
-                            result = await run_model_inference(
+                            result, progression = await run_model_inference(
                                 request.messages,
                                 max_new_tokens=request.max_new_tokens,
                                 temperature=request.temperature,
@@ -278,6 +289,7 @@ async def generate_text(request: GenerationRequest, background_tasks: Background
                                 "result": result,
                                 "processing_time": processing_time,
                                 "queue_time": queue_time,
+                                "progression": progression,
                             }
 
                     return await asyncio.wait_for(inner_fn(), timeout=request.timeout)
