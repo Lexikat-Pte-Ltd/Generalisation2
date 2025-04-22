@@ -169,7 +169,7 @@ def main(
 
     # Generate special environment getter code
     logger.info(f"EA - Generating {EA_MAX_SP_EGC} special environment getter code.")
-    new_tch, new_sp_egc_s = ea.gen_multi_sp_egc_(
+    new_tch, new_sp_egc_s = ea.gen_multi_sp_egc_2(
         count=EA_MAX_SP_EGC,
         in_con_path=in_con_path,
         genner=genner,
@@ -219,7 +219,7 @@ def main(
     main_ca.tagged_chat_history.messages.extend(new_tch.messages)
 
     # Generate strategies based on the new environment info
-    new_tch, main_ca.strats, strats_str = main_ca.gen_strats_(genner, BACKEND)
+    new_tch, main_ca.strats, strats_str = main_ca.gen_strats_2(genner, BACKEND)
     logger.debug(f"SA - New TCH -\n{format_tch(new_tch)}")
 
     for t_message in new_tch.messages:
@@ -444,8 +444,7 @@ def validate_and_run_code(
 
     if not ast_valid:
         logger.error(
-            f"SA - {i}-th strat - {attempt + 1}-th attempt - "
-            f"AST error \n{ast_error}"
+            f"SA - {i}-th strat - {attempt + 1}-th attempt - AST error \n{ast_error}"
         )
         logger.debug(f"SA - Code is \n{code[:100]}...")
 

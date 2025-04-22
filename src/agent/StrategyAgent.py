@@ -16,6 +16,7 @@ from src.prep import (
     get_special_env_plist,
     get_strats_req_plist,
     get_strats_regen_plist,
+    get_strats_req_plist_2,
     get_system_plist,
 )
 from src.types import Message, TaggedMessage, TaggedPList
@@ -167,7 +168,7 @@ class StrategyAgent(BaseAgent):
 
         return local_tch, [], ""
 
-    def gen_strats_(
+    def gen_strats_2(
         self,
         genner: Genner,
         model_name: str,
@@ -234,6 +235,106 @@ class StrategyAgent(BaseAgent):
                 "]\n"
                 "}\n"
                 "```",
+            )
+
+            if len(list_of_problems) > 0:
+                logger.error(
+                    f"List generation failed, tag history: {self.tagged_chat_history.get_tags() + local_tch.get_tags()}, retrying..."
+                )
+
+                local_tch.messages.append(
+                    TaggedMessage(
+                        message=Message(role="assistant", content=raw_response),
+                        tag="genned_strats(failed)",
+                    )
+                )
+                local_tch.messages.extend(
+                    get_strats_regen_plist(
+                        list_of_problems=list_of_problems,
+                    ),
+                )
+                continue
+
+            local_tch.messages.append(
+                TaggedMessage(
+                    message=Message(role="assistant", content=raw_response),
+                    tag="genned_strats(success)",
+                )
+            )
+
+            return local_tch, processed_list, raw_response
+
+        if len(list_of_problems) > 0:
+            sampled_strats = random.sample(self.prev_strats, 10)
+            sampled_strats_as_json = json.dumps({"strategies": sampled_strats})
+            sampled_strats_as_json_formatted = f"```json\n{sampled_strats_as_json}\n```"
+
+            local_tch.messages.append(
+                TaggedMessage(
+                    message=Message(
+                        role="assistant", content=sampled_strats_as_json_formatted
+                    ),
+                    tag="genned_strats(success)",
+                )
+            )
+            return local_tch, sampled_strats, sampled_strats_as_json_formatted
+
+        return local_tch, [], ""
+
+    def gen_strats_3(
+        self,
+        genner: Genner,
+        model_name: str,
+        max_attempts: int = 3,
+    ) -> Tuple[TaggedPList, List[str], str]:
+        """Generate strategies based on the current chat history.
+
+        Logic:
+        1. Generate strategies based on self.tagged_chat_history and new fresh tagged chat history
+        2. If the strategies are not valid, try again
+        3. If the strategies are valid, return them
+
+        Args:
+            genner (Genner): The generator to use for strategy generation
+            model_name (str): The name of the model to use for strategy generation
+            max_attempts (int, optional): The maximum number of attempts to make. Defaults to 3.
+
+        Raises:
+            ValueError: If the tags of the self tagged chat history do not make sense to what is intended
+
+        Returns:
+            TaggedPList: The new local tagged chat history
+            TaggedPList: The new perfect tagged chat history
+            List[str]: The generated strategies
+            str: The raw response
+        """
+        local_tch = TaggedPList(
+            get_strats_req_plist_2(
+                in_con_path=self.in_con_path,
+                prev_strats=self.prev_strats,
+                model_name=model_name,
+            )
+        )
+
+        expected_tags = [
+            GET_SYSTEM_PLIST_TAG,
+            GET_BASIC_ENV_PLIST_TAG,
+            GET_SPECIAL_ENV_PLIST_TAG,
+            f"{GET_STRATS_REQ_PLIST_TAG}({model_name})",
+        ]
+
+        is_current_tags_makes_sense = (
+            self.tagged_chat_history.get_tags() + local_tch.get_tags() == expected_tags
+        )
+
+        if not is_current_tags_makes_sense:
+            raise ValueError(
+                f"Current tags do not make sense, tags are {self.tagged_chat_history.get_tags()} expected {expected_tags}"
+            )
+
+        for attempt in range(max_attempts):
+            list_of_problems, processed_list, raw_response = genner.generate_list(
+                self.tagged_chat_history.as_plist() + local_tch.as_plist(),
             )
 
             if len(list_of_problems) > 0:
