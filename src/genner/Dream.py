@@ -1,75 +1,124 @@
-from .Base import Genner
-from abc import abstractmethod
+import ast
+import re
+from typing import Any, List, Tuple, cast
+from loguru import logger
+from src.config import DreamConfig
 from src.types import PList
-from typing import Tuple
+import requests
+
+from .Base import Genner
+
 
 class DreamGenner(Genner):
-    def __init__(self, identifier: str):
-        self.identifier = identifier
+    def __init__(self, config: DreamConfig):
+        self.cfg = config
 
-    @abstractmethod
     def plist_completion(self, messages: PList) -> Tuple[bool, str]:
-        """Generate a single strategy based on the current chat history.
+        url = f"{self.cfg.base_url.rstrip('/')}/generate"
+        messages = cast(Any, messages.as_native())
+        payload = {
+            "messages": messages,
+            "max_new_tokens": self.cfg.max_new_tokens,
+            "temperature": self.cfg.temperature,
+            "top_p": self.cfg.top_p,
+            "steps": self.cfg.steps,
+            "alg": self.cfg.alg,
+            "alg_temp": self.cfg.alg_temp,
+        }
 
-        Args:
-        	messages (PList): Chat history
+        try:
+            r = requests.post(
+                url,
+                json=payload,
+                timeout=self.cfg.timeout,
+            )
 
-        Returns:
-			bool: Whether the completion is successful
-			str: Generation result
-        """
-        pass
+            r.raise_for_status()
 
-    @abstractmethod
-    def generate_code(self, messages: PList) -> Tuple[List[str], str, str]:
-        """Generate a single strategy based on the current chat history.
+            json_payload = cast(dict[str, Any], r.json())
+            text_response = cast(str, json_payload["result"])
 
-        Args:
-            messages (PList): Chat history
+            return True, text_response
+        except Exception as e:
+            logger.error(
+                "Dream API request failed, "
+                f"`url`: {url}\n"
+                f"`self.cfg`: \n{str(self.cfg)}\n"
+                f"`e`: \n{e}\n"
+            )
+            return False, ""
 
-        Returns:
-            List[str]: List of problems when generating the code
-            str: The generated strategy
-            str: The raw response
-        """
-        pass
+    def generate_code(self, messages: PList) -> Tuple[bool, str, str]:
+        try:
+            ok, raw = self.plist_completion(messages)
 
-    @abstractmethod
-    def generate_list(self, messages: PList) -> Tuple[List[str], List[str], str]:
-        """Generate a list of strategies based on the current chat history.
+            if not ok:
+                logger.error("Failed to get response from Dream API")
+                return False, "", ""
 
-        Args:
-            messages (PList): Chat history
+            ok, code = self.extract_code(raw)
 
-        Returns:
-            List[str]: List of problems when generating the list
-            List[str]: The generated strategies
-            str: The raw response
-        """
-        pass
+            if not ok:
+                logger.error("Failed to extract list from response")
+                return False, "", raw
 
-    @abstractmethod
-    def extract_code(self, response: str) -> Tuple[List[str], str]:
-        """Extract the code from the response.
+            return True, code, raw
+        except Exception as e:
+            logger.error(
+                "Unexpected error while generating code with Dream,\n",
+                f"`e`: \n{e}\n",
+            )
+            return False, "", ""
 
-        Args:
-            response (str): The raw response
+    def generate_list(self, messages: PList) -> Tuple[bool, List[str], str]:
+        try:
+            ok, raw = self.plist_completion(messages)
 
-        Returns:
-            List[str]: List of problems when extracting the code
-            str: The extracted code
-        """
-        pass
+            if not ok:
+                logger.error("Failed to get response from Dream API")
+                return False, [], ""
 
-    @abstractmethod
-    def extract_list(self, response: str) -> Tuple[List[str], List[str]]:
-        """Extract a list of strategies from the response.
+            ok, items = self.extract_list(raw)
 
-        Args:
-            response (str): The raw response
+            if not ok:
+                logger.error("Failed to extract list from response")
+                return False, [], raw
 
-        Returns:
-            List[str]: List of problems when extracting the list
-            List[str]: The extracted strategies
-        """
-        pass
+            return True, items, raw
+        except Exception as e:
+            logger.error(
+                "Unexpected error while generating list with Dream,\n",
+                f"`e`: \n{e}\n",
+            )
+            return False, [], ""
+
+    @staticmethod
+    def extract_code(response: str) -> Tuple[bool, str]:
+        try:
+            pattern = r"```python\n([\s\S]*?)```"
+            match = re.search(pattern, response, re.DOTALL)
+            assert match is not None, "Code block not found"
+
+            code_str = match.group(1)
+            assert isinstance(code_str, str), "Code block is not a string"
+
+            return True, code_str
+        except Exception as e:
+            logger.error("Code extraction failed: {}", e)
+            return False, ""
+
+    @staticmethod
+    def extract_list(response: str) -> Tuple[bool, List[str]]:
+        try:
+            start, end = response.index("["), response.rindex("]") + 1
+            list_str = response[start:end]
+            parsed = cast(List[str], ast.literal_eval(list_str))
+
+            assert all(isinstance(item, str) for item in parsed), (
+                "All items must be strings"
+            )
+
+            return True, parsed
+        except Exception as e:
+            logger.error("List extraction failed: {}", e)
+            return False, []
