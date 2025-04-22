@@ -56,6 +56,7 @@ class GenerationResponse(BaseModel):
     result: str
     processing_time: float
     queue_time: float
+    progression: List[str]
 
 
 class StatusResponse(BaseModel):
@@ -162,9 +163,10 @@ async def run_model_inference(
 
             def generation_tokens_hook_func(step, x, logits):
                 progression.append(
-                    tokenizer.decode(x[0].tolist())
-                    .split(tokenizer.eos_token)[0]
-                    .replace(tokenizer.mask_token, " "),
+                    f"Step {step}: "
+                    + tokenizer.decode(x[0].tolist())  # type: ignore
+                    .split(tokenizer.eos_token)[0]  # type: ignore
+                    .replace(tokenizer.mask_token, "<MaskToken>"),  # type: ignore
                 )
                 return x
 
