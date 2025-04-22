@@ -24,6 +24,7 @@ dependencies = [
     "pydantic",
     "python-dotenv",
     "pyyaml>=6.0.2",
+    "result>=0.17.0",
     "schedule>=1.2.2",
     "setuptools>=75.8.0",
     "transformers>=4.47.1",
