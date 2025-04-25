@@ -23,7 +23,7 @@ class DreamGenner(Genner):
             "top_p": self.cfg.top_p,
             "steps": self.cfg.steps,
             "alg": self.cfg.alg,
-            "alg_temp": self.cfg.alg_temp,
+            "timeout": self.cfg.timeout,
         }
 
         try:
@@ -39,9 +39,19 @@ class DreamGenner(Genner):
             text_response = cast(str, json_payload["result"])
 
             return True, text_response
-        except Exception as e:
+        except requests.exceptions.HTTPError as e:
             logger.error(
                 "Dream API request failed, "
+                f"`e.response.status_code`: {e.response.status_code}\n"
+                f"`e.response.text`: {e.response.text}\n"
+                f"`url`: {url}\n"
+                f"`self.cfg`: \n{str(self.cfg)}\n"
+                f"`e`: \n{e}\n"
+            )
+            return False, ""
+        except Exception as e:
+            logger.error(
+                "Dream API request failed, unexpected error, "
                 f"`url`: {url}\n"
                 f"`self.cfg`: \n{str(self.cfg)}\n"
                 f"`e`: \n{e}\n"

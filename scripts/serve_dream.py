@@ -1,4 +1,9 @@
-import torch
+# ruff: noqa: E402
+import os 
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+print(f"CUDA_LAUNCH_BLOCKING set to: {os.environ.get('CUDA_LAUNCH_BLOCKING')}")  # Verify
+
+import torch  
 import asyncio
 import logging
 import gc
@@ -43,13 +48,12 @@ class Message(BaseModel):
 
 class GenerationRequest(BaseModel):
     messages: List[Message]
-    max_new_tokens: int = Field(default=512, ge=1, le=2048)
-    temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    top_p: float = Field(default=0.95, ge=0.0, le=1.0)
-    steps: int = Field(default=10, ge=1, le=50)
-    alg: str = Field(default="entropy", pattern="^(entropy|uniform)$")
-    alg_temp: float = Field(default=0.0, ge=0.0, le=2.0)
-    timeout: int = Field(default=300, ge=10, le=600)  # Default timeout in seconds
+    max_new_tokens: int = Field(default=512)
+    temperature: float = Field(default=0.2)
+    top_p: float = Field(default=0.95)
+    steps: int = Field(default=10)
+    alg: str = Field(default="entropy")
+    timeout: int = Field(default=300)  # Default timeout in seconds
 
 
 class GenerationResponse(BaseModel):
@@ -84,6 +88,7 @@ async def load_model():
         model = AutoModel.from_pretrained(
             model_path, torch_dtype=torch.bfloat16, trust_remote_code=True
         )
+        model = model.bfloat16()
 
         if torch.cuda.is_available():
             logger.info("Moving model to CUDA")
@@ -282,7 +287,7 @@ async def generate_text(request: GenerationRequest, background_tasks: Background
                                 top_p=request.top_p,
                                 steps=request.steps,
                                 alg=request.alg,
-                                alg_temp=request.alg_temp,
+                                alg_temp=0.0,
                             )
 
                             processing_time = time.time() - processing_start_time
