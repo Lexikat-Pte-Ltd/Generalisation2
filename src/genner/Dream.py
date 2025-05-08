@@ -27,7 +27,7 @@ class DreamGenner(Genner):
             "top_p": self.config.top_p,
             "steps": self.config.steps,
             "alg": self.config.alg,
-            "alg_temp": self.config.alg_temp,
+            "timeout": self.config.timeout,
         }
 
         try:

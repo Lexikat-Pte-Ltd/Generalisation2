@@ -50,7 +50,9 @@ class DreamConfig(NamedTuple):
     """Configuration for the Dream API generator."""
 
     # API connection settings
-    base_url: str = "http://34.124.150.248:6969"
+    base_url: str = "http://34.87.4.35:6969"
+    # Allow overriding via DREAM_BASE_URL; default to localhost if unset
+    # base_url: str = os.getenv("DREAM_BASE_URL", "http://localhost:6969")
     timeout: int = 120
 
     # Generation parameters
@@ -61,4 +63,4 @@ class DreamConfig(NamedTuple):
     # Algorithm settings
     steps: int = 10
     alg: str = "entropy"
-    alg_temp: float = 0
+    # alg_temp: float = 0.0
