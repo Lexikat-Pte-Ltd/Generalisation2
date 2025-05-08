@@ -1,36 +1,40 @@
 import ast
 import re
-from typing import Any, List, Tuple, cast
+from typing import Any, List, Tuple, cast, Optional
+
+import requests
 from loguru import logger
+from result import Result, Ok, Err, UnwrapError
+
 from src.config import DreamConfig
 from src.types import PList
-import requests
 
 from .Base import Genner
 
 
 class DreamGenner(Genner):
     def __init__(self, config: DreamConfig):
-        self.cfg = config
+        super().__init__("dream")
+        self.config = config
 
-    def plist_completion(self, messages: PList) -> Tuple[bool, str]:
-        url = f"{self.cfg.base_url.rstrip('/')}/generate"
-        messages = cast(Any, messages.as_native())
+    def plist_completion(self, messages: PList) -> Result[str, str]:
+        url = f"{self.config.base_url.rstrip('/')}/generate"
+        messages_native = cast(Any, messages.as_native())
         payload = {
-            "messages": messages,
-            "max_new_tokens": self.cfg.max_new_tokens,
-            "temperature": self.cfg.temperature,
-            "top_p": self.cfg.top_p,
-            "steps": self.cfg.steps,
-            "alg": self.cfg.alg,
-            "alg_temp": self.cfg.alg_temp,
+            "messages": messages_native,
+            "max_new_tokens": self.config.max_new_tokens,
+            "temperature": self.config.temperature,
+            "top_p": self.config.top_p,
+            "steps": self.config.steps,
+            "alg": self.config.alg,
+            "alg_temp": self.config.alg_temp,
         }
 
         try:
             r = requests.post(
                 url,
                 json=payload,
-                timeout=self.cfg.timeout,
+                timeout=self.config.timeout,
             )
 
             r.raise_for_status()
@@ -38,62 +42,41 @@ class DreamGenner(Genner):
             json_payload = cast(dict[str, Any], r.json())
             text_response = cast(str, json_payload["result"])
 
-            return True, text_response
+            return Ok(text_response)
         except Exception as e:
-            logger.error(
-                "Dream API request failed, "
+            return Err(
+                "DreamGenner.plist_completion: Unexpected error,"
                 f"`url`: {url}\n"
-                f"`self.cfg`: \n{str(self.cfg)}\n"
+                f"`self.config`: \n{str(self.config)}\n"
                 f"`e`: \n{e}\n"
             )
-            return False, ""
 
-    def generate_code(self, messages: PList) -> Tuple[bool, str, str]:
+    def generate_code(
+        self, messages: PList
+    ) -> Result[Tuple[str, str], Tuple[str, Optional[str]]]:
+        raw_response: Optional[str] = None
         try:
-            ok, raw = self.plist_completion(messages)
-
-            if not ok:
-                logger.error("Failed to get response from Dream API")
-                return False, "", ""
-
-            ok, code = self.extract_code(raw)
-
-            if not ok:
-                logger.error("Failed to extract list from response")
-                return False, "", raw
-
-            return True, code, raw
-        except Exception as e:
-            logger.error(
-                "Unexpected error while generating code with Dream,\n",
-                f"`e`: \n{e}\n",
+            raw_response = self.plist_completion(messages).unwrap()
+            extracted_code = self.extract_code(raw_response).unwrap()
+            return Ok((extracted_code, raw_response))
+        except UnwrapError as e:
+            error_message = (
+                "DreamGenner.generate_code: Unwrap error,\n"
+                f"`self.config`: {self.config}\n" # Note: DreamConfig doesn't have .name or .model directly like ClaudeConfig
+                f"`e.result.err()`: \n{e.result.err()}\n"
             )
-            return False, "", ""
-
-    def generate_list(self, messages: PList) -> Tuple[bool, List[str], str]:
-        try:
-            ok, raw = self.plist_completion(messages)
-
-            if not ok:
-                logger.error("Failed to get response from Dream API")
-                return False, [], ""
-
-            ok, items = self.extract_list(raw)
-
-            if not ok:
-                logger.error("Failed to extract list from response")
-                return False, [], raw
-
-            return True, items, raw
+            return Err((error_message, raw_response))
         except Exception as e:
-            logger.error(
-                "Unexpected error while generating list with Dream,\n",
-                f"`e`: \n{e}\n",
+            error_message = (
+                "DreamGenner.generate_code: Unexpected error,\n"
+                f"`self.config`: {self.config}\n"
+                f"`messages`: \n{messages}\n"
+                f"`e`: \n{e}\n"
             )
-            return False, [], ""
+            return Err((error_message, raw_response))
 
     @staticmethod
-    def extract_code(response: str) -> Tuple[bool, str]:
+    def extract_code(response: str) -> Result[str, str]:
         try:
             pattern = r"```python\n([\s\S]*?)```"
             match = re.search(pattern, response, re.DOTALL)
@@ -102,13 +85,40 @@ class DreamGenner(Genner):
             code_str = match.group(1)
             assert isinstance(code_str, str), "Code block is not a string"
 
-            return True, code_str
+            return Ok(code_str)
         except Exception as e:
-            logger.error("Code extraction failed: {}", e)
-            return False, ""
+            return Err(
+                "DreamGenner.extract_code: Unexpected error,\n"  #
+                f"`response`: \n{response}\n"
+                f"`e`: \n{e}\n"
+            )
+
+    def generate_list(
+        self, messages: PList
+    ) -> Result[Tuple[List[str], str], Tuple[str, Optional[str]]]:
+        raw_response: Optional[str] = None
+        try:
+            raw_response = self.plist_completion(messages).unwrap()
+            extracted_list = self.extract_list(raw_response).unwrap()
+            return Ok((extracted_list, raw_response))
+        except UnwrapError as e:
+            error_message = (
+                "DreamGenner.generate_list: Unwrap error,\n"
+                f"`self.config`: {self.config}\n" # Note: DreamConfig doesn't have .name or .model directly
+                f"`e.result.err()`: \n{e.result.err()}\n"
+            )
+            return Err((error_message, raw_response))
+        except Exception as e:
+            error_message = (
+                "DreamGenner.generate_list: Unexpected error,\n"
+                f"`self.config`: {self.config}\n"
+                f"`messages`: \n{messages}\n"
+                f"`e`: \n{e}\n"
+            )
+            return Err((error_message, raw_response))
 
     @staticmethod
-    def extract_list(response: str) -> Tuple[bool, List[str]]:
+    def extract_list(response: str) -> Result[List[str], str]:
         try:
             start, end = response.index("["), response.rindex("]") + 1
             list_str = response[start:end]
@@ -118,7 +128,10 @@ class DreamGenner(Genner):
                 "All items must be strings"
             )
 
-            return True, parsed
+            return Ok(parsed)
         except Exception as e:
-            logger.error("List extraction failed: {}", e)
-            return False, []
+            return Err(
+                "DreamGenner.extract_list: Unexpected error,\n"  #
+                f"`response`: \n{response}\n"
+                f"`e`: \n{e}\n"
+            )

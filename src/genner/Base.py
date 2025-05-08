@@ -1,170 +1,190 @@
 from abc import ABC, abstractmethod
-from src.config import (
-  OllamaConfig,
-)
-from typing import List, Tuple
-from src.types import PList
+from typing import List, Optional, Tuple
+
 from loguru import logger
-from ollama import ChatResponse, chat
+from ollama import ChatResponse, Client, chat
+from result import Result, Ok, Err, UnwrapError, is_err
+
+from src.config import (
+    OllamaConfig,
+)
+from src.helper import timeout
+from src.types import PList
 
 
 class Genner(ABC):
-  def __init__(self, identifier: str):
-    self.identifier = identifier
+    def __init__(self, identifier: str):
+        self.identifier = identifier
 
-  @abstractmethod
-  def plist_completion(self, messages: PList) -> Tuple[bool, str]:
-    """Generate a single strategy based on the current chat history.
+    @abstractmethod
+    def plist_completion(self, messages: PList) -> Result[str, str]:
+        pass
 
-    Args:
-      messages (PList): Chat history
+    @abstractmethod
+    def generate_code(
+        self, messages: PList
+    ) -> Result[Tuple[str, str], Tuple[str, Optional[str]]]:
+        pass
 
-    Returns:
-      bool: Whether the completion is successful
-      str: Generation result
-    """
-    pass
+    @abstractmethod
+    def generate_list(
+        self, messages: PList
+    ) -> Result[Tuple[List[str], str], Tuple[str, Optional[str]]]:
+        pass
 
-  @abstractmethod
-  def generate_code(self, messages: PList) -> Tuple[List[str], str, str]:
-    """Generate a single strategy based on the current chat history.
+    @staticmethod
+    @abstractmethod
+    def extract_code(response: str) -> Result[str, str]:
+        pass
 
-    Args:
-        messages (PList): Chat history
-
-    Returns:
-        List[str]: List of problems when generating the code
-        str: The generated strategy
-        str: The raw response
-    """
-    pass
-
-  @abstractmethod
-  def generate_list(self, messages: PList) -> Tuple[List[str], List[str], str]:
-    """Generate a list of strategies based on the current chat history.
-
-    Args:
-        messages (PList): Chat history
-
-    Returns:
-        List[str]: List of problems when generating the list
-        List[str]: The generated strategies
-        str: The raw response
-    """
-    pass
-
-  @abstractmethod
-  def extract_code(self, response: str) -> Tuple[List[str], str]:
-    """Extract the code from the response.
-
-    Args:
-        response (str): The raw response
-
-    Returns:
-        List[str]: List of problems when extracting the code
-        str: The extracted code
-    """
-    pass
-
-  @abstractmethod
-  def extract_list(self, response: str) -> Tuple[List[str], List[str]]:
-    """Extract a list of strategies from the response.
-
-    Args:
-        response (str): The raw response
-
-    Returns:
-        List[str]: List of problems when extracting the list
-        List[str]: The extracted strategies
-    """
-    pass
+    @staticmethod
+    @abstractmethod
+    def extract_list(response: str) -> Result[List[str], str]:
+        pass
 
 
 class OllamaGenner(Genner):
-  def __init__(self, config: OllamaConfig, identifier: str):
-    super().__init__(identifier)
-
-    self.config = config
-
-  def plist_completion(self, messages: PList) -> Tuple[bool, str]:
-    try:
-      response: ChatResponse = chat(self.config.model, messages.as_native())
-
-      if response.message.content is None:
-        logger.error(
-          f"No content in the response, config: {self.config.model}, messages: {messages}"
+    def __init__(self, config: OllamaConfig, identifier: str):
+        super().__init__(identifier)
+        self.client = Client(
+            host=config.endpoint,
         )
-        return False, ""
 
-      return True, response.message.content
-    except Exception as e:
-      logger.error(
-        f"An unexpected Ollama error while generating code with {self.config.name} occured: {e}, raw response: {response}"
-      )
-      return False, ""
+        self.config = config
 
-  def generate_code(
-    self, messages: PList, wrap_code: bool = True
-  ) -> Tuple[List[str], str, str]:
-    try:
-      completion_succeed, raw_response = self.plist_completion(messages)
+    def plist_completion(self, messages: PList) -> Result[str, str]:
+        try:
+            with timeout(300):
+                response: ChatResponse = self.client.chat(
+                    self.config.model, messages.as_native()
+                )
 
-      if not completion_succeed:
-        logger.error(
-          f"PList completion failed, raw response: {raw_response}, messages: {messages}"
-        )
-        return ["PList completion failed"], "", ""
+            if response.message.content is None:
+                return Err(
+                    "OllamaGenner.plist_completion: No content in response,\n"  #
+                    f"`self.config.model`: {self.config.model}"
+                    f"`messages`: \n{messages}"
+                )
 
-      processing_problems, processed_code = self.extract_code(raw_response)
+            return Ok(response.message.content)
+        except TimeoutError as e:
+            return Err(
+                "OllamaGenner.plist_completion: Timeout error,\n"  #
+                f"`self.config.model`: {self.config.model}"
+                f"`messages`: \n{messages}\n"
+                f"`e`: \n{e}"
+            )
+        except Exception as e:
+            return Err(
+                "OllamaGenner.plist_completion: Unexpected error,\n"  #
+                f"`self.config.name`: {self.config.name}"
+                f"`self.config.model`: {self.config.model}"
+                f"`messages`: \n{messages}\n"
+                f"`e`: \n{e}"
+            )
 
-      if len(processing_problems) > 0:
-        logger.error(
-          f"Code extraction failed, raw response: {raw_response}, processed code: {processed_code}"
-        )
-        return processing_problems + ["Code extraction failed"], "", ""
+    def generate_code(
+        self, messages: PList, wrap_code: bool = True
+    ) -> Result[Tuple[str, str], Tuple[str, Optional[str]]]:
+        raw_response: Optional[str] = None
+        try:
+            raw_response = self.plist_completion(messages).unwrap()
+            extracted_code = self.extract_code(raw_response).unwrap() 
 
-      logger.debug(
-        f"Generate code succeed, raw response: {raw_response}, processed code: {processed_code}"
-      )
+            return Ok((extracted_code, raw_response)) 
+        except UnwrapError as e:
+            err_msg_prefix = "OllamaGenner.generate_code"
+            if raw_response is None: # Error in plist_completion
+                error_message = (
+                    f"{err_msg_prefix}: Plist completion failed,\n"
+                    f"`self.config.name`: {self.config.name}\n"
+                    f"`self.config.model`: {self.config.model}\n"
+                    f"`e.result.err()`: \n{e.result.err()}\n"
+                )
+            else: # Error in extract_code
+                error_message = (
+                    f"{err_msg_prefix}: Code extraction failed,\n"
+                    f"`self.config.name`: {self.config.name}\n"
+                    f"`self.config.model`: {self.config.model}\n"
+                    f"`raw_response`: \n{raw_response}\n"
+                    f"`e.result.err()`: \n{e.result.err()}\n"
+                )
+            return Err((error_message, raw_response))
+        except Exception as e:
+            err_msg_prefix = "OllamaGenner.generate_code"
+            context_info = (
+                f"`self.config.name`: {self.config.name}\n"
+                f"`self.config.model`: {self.config.model}\n"
+                f"`messages`: \n{messages}\n"
+            )
+            if raw_response is None: # Error likely in plist_completion or before it
+                error_message = (
+                    f"{err_msg_prefix}: Unexpected error during plist completion,\n"
+                    f"{context_info}"
+                    f"`e`: \n{e}\n"
+                )
+            else: # Error likely in extract_code
+                error_message = (
+                    f"{err_msg_prefix}: Unexpected error during code extraction,\n"
+                    f"{context_info}"
+                    f"`raw_response`: \n{raw_response}\n"
+                    f"`e`: \n{e}\n"
+                )
+            return Err((error_message, raw_response))
 
-      return [], processed_code, raw_response
-    except Exception as e:
-      logger.error(
-        f"An unexpected error while generating code with {self.config.name} occured: {e}, raw response: {raw_response}"
-      )
+    def generate_list(
+        self, messages: PList
+    ) -> Result[Tuple[List[str], str], Tuple[str, Optional[str]]]:
+        raw_response: Optional[str] = None
+        try:
+            raw_response = self.plist_completion(messages).unwrap()
+            # raw_response here is guaranteed to be a string due to successful unwrap above
+            processed_list = self.extract_list(raw_response).unwrap() # type: ignore
+            return Ok((processed_list, raw_response)) # type: ignore
+        except UnwrapError as e:
+            err_msg_prefix = "OllamaGenner.generate_list"
+            if raw_response is None: # Error in plist_completion
+                error_message = (
+                    f"{err_msg_prefix}: Plist completion failed,\n"
+                    f"`self.config.name`: {self.config.name}\n"
+                    f"`self.config.model`: {self.config.model}\n"
+                    f"`e.result.err()`: \n{e.result.err()}\n"
+                )
+            else: # Error in extract_list
+                error_message = (
+                    f"{err_msg_prefix}: List extraction failed,\n"
+                    f"`self.config.name`: {self.config.name}\n"
+                    f"`self.config.model`: {self.config.model}\n"
+                    f"`raw_response`: \n{raw_response}\n"
+                    f"`e.result.err()`: \n{e.result.err()}\n"
+                )
+            return Err((error_message, raw_response))
+        except Exception as e:
+            err_msg_prefix = "OllamaGenner.generate_list"
+            context_info = (
+                f"`self.config.name`: {self.config.name}\n"
+                f"`self.config.model`: {self.config.model}\n"
+                f"`messages`: \n{messages}\n"
+            )
+            if raw_response is None: # Error likely in plist_completion or before it
+                error_message = (
+                    f"{err_msg_prefix}: Unexpected error during plist completion,\n"
+                    f"{context_info}"
+                    f"`e`: \n{e}\n"
+                )
+            else: # Error likely in extract_list
+                error_message = (
+                    f"{err_msg_prefix}: Unexpected error during list extraction,\n"
+                    f"{context_info}"
+                    f"`raw_response`: \n{raw_response}\n"
+                    f"`e`: \n{e}\n"
+                )
+            return Err((error_message, raw_response))
 
-      return [f"An unexpected error occured, {e}"], "", ""
+    @staticmethod
+    def extract_code(response: str) -> Result[str, str]:
+        return Ok(response)
 
-  def generate_list(self, messages: PList) -> Tuple[List[str], List[str], str]:
-    try:
-      completion_succeed, raw_response = self.plist_completion(messages)
-
-      if not completion_succeed:
-        logger.error("PList completion failed")
-        return ["PList completion failed"], [], ""
-
-      processing_problems, processed_list = self.extract_list(raw_response)
-
-      if len(processing_problems) > 0:
-        logger.error(f"List extraction failed, raw response: {raw_response}")
-        return processing_problems + ["List extraction failed"], [], ""
-
-      logger.debug(
-        f"Generate list succeed, raw response: {raw_response}, processed list: {processed_list}"
-      )
-
-      return [], processed_list, raw_response
-    except Exception as e:
-      logger.error(
-        f"An unexpected error while generating list with {self.config.name} occured: {e}, raw response: {raw_response}"
-      )
-
-      return [f"An unexpected error occured, {e}"], [], ""
-
-  @abstractmethod
-  def extract_code(self, response: str) -> Tuple[List[str], str]:
-    pass
-
-  @abstractmethod
-  def extract_list(self, response: str) -> Tuple[List[str], List[str]]:
-    pass
+    @staticmethod
+    def extract_list(response: str) -> Result[List[str], str]:
+        return Ok(response.splitlines())

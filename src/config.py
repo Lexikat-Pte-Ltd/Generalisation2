@@ -1,8 +1,9 @@
 from abc import ABC
 from typing import Dict, NamedTuple
+from pydantic import BaseModel
 
 
-class OllamaConfig(ABC):
+class OllamaConfig(ABC, BaseModel):
     name: str
     endpoint: str = "http://localhost:11434/api/chat"
     model: str
@@ -24,8 +25,7 @@ class WizardCoderConfig(OllamaConfig):
 class QwenConfig(OllamaConfig):
     name: str = "Ollama Qwen"
     model: str = "qwen2.5-coder:latest"
-    model_uncensored: str = "qwen-uncensored:latest"
-
+    _model_uncensored: str = "qwen-uncensored:latest"
     stream: bool = False
 
 

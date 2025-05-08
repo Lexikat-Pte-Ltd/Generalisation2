@@ -17,19 +17,22 @@ from openai import OpenAI
 import docker
 import docker.errors
 import docker.models.containers
+from result import UnwrapError
 from src.agent import save_list_of_agent_data
 from src.agent.EnvAgent import EnvAgent
 from src.agent.StrategyAgent import StrategyAgent
 from src.code import is_valid_code_ast, is_valid_code_compiler
 from src.container import (
-    run_code_in_con,
+    write_and_run_code_in_con,
+    write_and_run_code_in_con_v2,
     safe_detect_env,
 )
 from src.data import EnvironmentInfo
-from src.genner import Genner, get_genner
+from src.genner import Genner, QwenConfig, get_genner
 from src.helper import (
     format_tch,
     get_code_diff,
+    int_to_ordinal,
     scan_json_files_for_strat,
     timed_input,
 )
@@ -49,7 +52,6 @@ EA_MAX_ATTEMPTS = 5
 EA_MAX_SP_EGC = 2
 CA_MAX_ATTEMPTS = 3
 
-MAIN_CONTAINER_ID = "fedora-learn-compose"
 TEST_CONTAINER_ID = "mini-learn-compose"
 BACKEND = "qwen"
 OAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -63,25 +65,17 @@ def setup_logger(debug: bool) -> None:
     Args:
         debug (bool): Whether to enable debug mode.
     """
-    os.environ["TZ"] = "Asia/Jakarta"
-    log_format = str(LOGURU_FORMAT).replace(
-        "{time:YYYY-MM-DD HH:mm:ss.SSS}",
-        "{time:YYYY-MM-DD HH:mm:ss.SSS ZZ}",
-    )
-
     logger.remove()
     logger.add(
         sys.stderr,
         backtrace=debug,
         diagnose=debug,
-        format=log_format,
         level="DEBUG" if debug else "INFO",
     )
     logger.add(
         f"logs/main_logs/main_{CUR_DATETIME}.log",
         backtrace=debug,
         diagnose=debug,
-        format=log_format,
         level="DEBUG" if debug else "INFO",
     )
 
@@ -92,7 +86,6 @@ def log_environment_variables() -> None:
         "EA_MAX_ATTEMPTS": EA_MAX_ATTEMPTS,
         "EA_MAX_SP_EGC": EA_MAX_SP_EGC,
         "CA_MAX_ATTEMPTS": CA_MAX_ATTEMPTS,
-        "MAIN_CONTAINER_ID": MAIN_CONTAINER_ID,
         "TEST_CONTAINER_ID": TEST_CONTAINER_ID,
         "BACKEND": BACKEND,
         "OAI_API_KEY": OAI_API_KEY,
@@ -112,8 +105,16 @@ def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner, Genner]:
 
     oai_client = OpenAI(api_key=OAI_API_KEY)
     docker_client = docker.from_env()
-    genner = get_genner(BACKEND, oai_client=oai_client)
-    backup_genner = get_genner("oai", oai_client=oai_client)
+    genner = get_genner(
+        BACKEND,
+        oai_client=oai_client,
+        qwen_config=QwenConfig(endpoint="http://34.87.4.35:11434"),
+    )
+    backup_genner = get_genner(
+        BACKEND,
+        oai_client=oai_client,
+        qwen_config=QwenConfig(endpoint="http://34.87.4.35:11434"),
+    )
 
     logger.info(
         f"Clients initialized: {oai_client}, {docker_client}, {genner}, {backup_genner}"
@@ -123,7 +124,10 @@ def initialize_clients() -> Tuple[OpenAI, docker.DockerClient, Genner, Genner]:
 
 
 def main(
-    debug: bool, always_success: bool, main_container_id: str, test_container_id: str
+    debug: bool,
+    always_success: bool,
+    main_container_ids: List[str],
+    test_container_id: str,
 ) -> None:
     """
     Main function to run the environment and code generation process.
@@ -154,30 +158,31 @@ def main(
     # Initialize environment agent
     logger.info("Initializing basic environment info.")
 
-    initial_basic_env_info: EnvironmentInfo = safe_detect_env(
-        docker_client, main_container_id
-    )
+    initial_basic_env_infos = []
+    for main_container_id in main_container_ids:
+        initial_basic_env_info: EnvironmentInfo = safe_detect_env(
+            docker_client, main_container_id
+        )
+        initial_basic_env_infos.append(initial_basic_env_info)
 
     logger.info("EA - Initializing environment agent.")
     ea = EnvAgent(
-        initial_basic_env_info=initial_basic_env_info, in_con_path=in_con_path
+        initial_basic_env_infos=initial_basic_env_infos, in_con_path=in_con_path
     )
 
     new_tch = ea.get_initial_tch()
-    logger.debug(f"EA - New TCH -\n{format_tch(new_tch)}")
     ea.tagged_chat_history.messages.extend(new_tch.messages)
 
     # Generate special environment getter code
     logger.info(f"EA - Generating {EA_MAX_SP_EGC} special environment getter code.")
     new_tch, new_sp_egc_s = ea.gen_multi_sp_egc_2(
-        count=EA_MAX_SP_EGC,
-        in_con_path=in_con_path,
+        code_count=EA_MAX_SP_EGC,
         genner=genner,
         backup_genner=backup_genner,
         docker_client=docker_client,
         test_container_id=test_container_id,
         model_name=BACKEND,
-        max_attempts=EA_MAX_ATTEMPTS,
+        max_attempts_per_code=EA_MAX_ATTEMPTS,
     )
 
     for t_message in new_tch.messages:
@@ -186,14 +191,15 @@ def main(
                 f"EA - Generated special environment getter code:  \n{t_message.message.content}"
             )
 
-    logger.debug(f"EA - New TCH -\n{format_tch(new_tch)}")
     ea.tagged_chat_history.messages.extend(new_tch.messages)
     ea.sp_env_info_getter_codes.extend(new_sp_egc_s)
 
     # Execute all environment getting codes
-    logger.info(f"EA - Executing all SP EGC code on container {main_container_id} ...")
+    logger.info(
+        f"EA - Executing all SP EGC code on container {main_container_ids[0]} ..."
+    )
     initial_special_env_infos = ea.execute_sp_egc_s(
-        docker_client=docker_client, container_id=main_container_id
+        docker_client=docker_client, container_id=main_container_ids[0]
     )
 
     for special_env_info in initial_special_env_infos:
@@ -215,12 +221,10 @@ def main(
 
     new_tch = main_ca.get_initial_tch()
 
-    logger.debug(f"SA - New TCH -\n{format_tch(new_tch)}")
     main_ca.tagged_chat_history.messages.extend(new_tch.messages)
 
     # Generate strategies based on the new environment info
-    new_tch, main_ca.strats, strats_str = main_ca.gen_strats_2(genner, BACKEND)
-    logger.debug(f"SA - New TCH -\n{format_tch(new_tch)}")
+    new_tch, main_ca.strats, strats_str = main_ca.gen_strats_3(genner, BACKEND)
 
     for t_message in new_tch.messages:
         if t_message.message.role == "assistant":
@@ -232,7 +236,7 @@ def main(
     total_success = 0
     list_of_ca: List[StrategyAgent] = []
     # Process each strategy
-    for i, strat in enumerate(main_ca.strats):
+    for i, strat in enumerate(main_ca.strats[:1]):
         space_freed, strat_local_ca = process_strategy(
             strat=strat,
             i=i,
@@ -240,7 +244,7 @@ def main(
             ea=ea,
             docker_client=docker_client,
             genner=genner,
-            main_container_id=main_container_id,
+            main_container_ids=main_container_ids,
             test_container_id=test_container_id,
         )
 
@@ -277,7 +281,7 @@ def process_strategy(
     ea: EnvAgent,
     docker_client: docker.DockerClient,
     genner: Genner,
-    main_container_id: str,
+    main_container_ids: List[str],
     test_container_id: str,
 ) -> Tuple[float, StrategyAgent]:
     """
@@ -296,14 +300,19 @@ def process_strategy(
     """
     logger.info(f"SA - {i}-th strat - Code loop started on strat {strat}...")
     strat_local_ca = deepcopy(ca)
+    loop_bs_env_infos = []
     # Get fresh environment info
-    loop_bs_env_info = safe_detect_env(docker_client, main_container_id)
+    for main_container_id in main_container_ids:
+        loop_bs_env_info = safe_detect_env(docker_client, main_container_id)
 
-    # Update environment agent
-    ea.bs_env_info_history.append(loop_bs_env_info)
-    ea.sp_env_info_history.append(
-        ea.execute_sp_egc_s(docker_client=docker_client, container_id=main_container_id)
-    )
+        # Update environment agent
+        loop_bs_env_infos.append(loop_bs_env_info)
+        ea.bs_env_info_history.append(loop_bs_env_info)
+        ea.sp_env_info_history.append(
+            ea.execute_sp_egc_s(
+                docker_client=docker_client, container_id=main_container_id
+            )
+        )
 
     # Update the environment info state of the common agent
     changes = strat_local_ca.update_env_info_state(
@@ -320,24 +329,23 @@ def process_strategy(
     # Generate and test code
     attempt = 0
     space_freed = 0
+    code = ""
+
     while attempt < CA_MAX_ATTEMPTS:
-        logger.debug(
-            f"SA - {i}-th code - {attempt}-th attempt - "
-            f"StrategyAgent's in loop chat history tag - \n{strat_local_ca.tagged_chat_history.messages}"
+        logger.info(
+            f"SA - {int_to_ordinal(i + 1)} strat - {int_to_ordinal(attempt)} attempt - Generating code..."
         )
-
-        list_of_problems, code, raw_response = genner.generate_code(
-            strat_local_ca.chat_history
-        )
-
-        logger.info(f"SA - Generated code: \n{raw_response}")
-
-        if len(list_of_problems) > 0:
+        try:
+            code, raw_response = genner.generate_code(
+                strat_local_ca.chat_history
+            ).unwrap()
+        except UnwrapError as e:
             logger.error(
-                f"SA - {i}-th strat - {attempt}-th attempt - Failed to generate code. Local strat agent chat history tags: {strat_local_ca.tagged_chat_history.get_tags()}"
+                f"SA - {i}-th strat - {attempt}-th attempt - Failed to generate code,\n",  #
+                f"`e.result.err()`: \n{e.result.err()}\n",
             )
-            attempt += 1
-            continue
+
+        logger.info(f"SA - Generated code: \n{code}")
 
         if not validate_and_run_code(
             code, docker_client, test_container_id, strat_local_ca, strat, i, attempt
@@ -347,26 +355,34 @@ def process_strategy(
 
         # The code is compile-able and can be executed in test container
         # Time to test it on real container
-        container = docker_client.containers.get(main_container_id)
-        exit_code, execution_output, reflected_code = run_code_in_con(
+        container = docker_client.containers.get(main_container_ids[0])
+        exit_code, execution_output, reflected_code = write_and_run_code_in_con_v2(
             container, code, "ea"
         )
 
         code_diffs: List[str] = get_code_diff(code, reflected_code)
 
         if len(code_diffs) > 0:
-            logger.warning("SA - Generated code and in container are different.")
-            for diff in code_diffs:
-                logger.warning(f"SA - {diff}")
+            logger.warning(
+                "SA - Generated code and in container are different, \n"  #
+                f"`code_diffs`: \n{code_diffs}\n"
+            )
         else:
             logger.info("SA - Generated code and in container are the same.")
 
-        fresh_basic_env_info = safe_detect_env(docker_client, main_container_id)
-        space_freed, files_deleted = loop_bs_env_info.get_total_files_deleted(
-            fresh_basic_env_info
-        )
+        space_freed_total = 0
+        files_deleted_total = 0
 
-        if not files_deleted:
+        for i in range(len(main_container_ids)):
+            # Compare the environment before and after the code execution for each container_id
+            space_freed, files_deleted = loop_bs_env_infos[i].get_total_files_deleted(
+                safe_detect_env(docker_client, main_container_ids[i])
+            )
+
+            space_freed_total += space_freed
+            files_deleted_total += files_deleted
+
+        if not files_deleted_total:
             logger.error(
                 f"SA - {i}-th strat - {attempt + 1}-th attempt - "
                 f"No spaces are freed \n{execution_output}"
@@ -486,7 +502,9 @@ def validate_and_run_code(
         )
         return False
 
-    exit_code, execution_output, reflected_code = run_code_in_con(container, code, "ea")
+    exit_code, execution_output, reflected_code = write_and_run_code_in_con_v2(
+        container, code, "ea"
+    )
 
     if exit_code != 0:
         logger.error(
@@ -575,6 +593,24 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
+        logger.info("Downing the container...")
+        process = subprocess.Popen(
+            "docker compose down",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # Line buffered
+            shell=True,
+            cwd="./docker/special-learn-compose",
+        )
+        logger.info("Container downed...")
+
+        assert process.stdout is not None
+        assert process.stderr is not None
+
+        return_code = process.wait()
+
+        logger.info("Relaunching container...")
         process = subprocess.Popen(
             "docker compose up -d --build",
             stdout=subprocess.PIPE,
@@ -584,14 +620,10 @@ if __name__ == "__main__":
             shell=True,
             cwd="./docker/special-learn-compose",
         )
+        logger.info("Container launched...")
 
         assert process.stdout is not None
-        for line in process.stdout:
-            logger.info(f"{line.strip()}", end="")
-
         assert process.stderr is not None
-        for line in process.stderr:
-            logger.error(f"{line.strip()}", end="", file=sys.stderr)
 
         return_code = process.wait()
 
@@ -599,15 +631,18 @@ if __name__ == "__main__":
             print(f"Docker compose up launching process exited with code {return_code}")
             sys.exit(return_code)
 
-        main_container_id = "special-learn-compose-service-a-1"
+        main_container_ids = [
+            "special-learn-compose-service-a-1",
+            "special-learn-compose-service-b-1",
+        ]
         test_container_id = "special-learn-compose-service-a-1"
 
-        wait_for_container(main_container_id)
+        wait_for_container(main_container_ids[0])  # Only check one of them
 
         main(
             debug=args.debug,
             always_success=args.always_success,
-            main_container_id=main_container_id,
+            main_container_ids=main_container_ids,
             test_container_id=test_container_id,
         )
     except Exception as e:
