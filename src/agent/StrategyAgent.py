@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from loguru import logger
+from result import Err, Ok, UnwrapError
 
 from src.data import EnvironmentInfo
 from src.genner import Genner
@@ -119,52 +120,34 @@ class StrategyAgent(BaseAgent):
                 f"Current tags do not make sense, tags are {self.tagged_chat_history.get_tags()} expected {expected_tags}"
             )
 
-        for attempt in range(max_attempts):
-            list_of_problems, processed_list, raw_response = genner.generate_list(
+        list_of_problems = []
+        for _ in range(max_attempts):
+            match genner.generate_list(
                 self.tagged_chat_history.as_plist() + local_tch.as_plist(),
-            )
-
-            if len(list_of_problems) > 0:
-                logger.error(
-                    f"List generation failed, tag history: {self.tagged_chat_history.get_tags() + local_tch.get_tags()}, retrying..."
-                )
-
-                local_tch.messages.append(
-                    TaggedMessage(
-                        message=Message(role="assistant", content=raw_response),
-                        tag="genned_strats(failed)",
+            ):
+                case Ok((processed_list, raw_response)):
+                    local_tch.messages.append(
+                        TaggedMessage(
+                            message=Message(role="assistant", content=raw_response),
+                            tag="genned_strats(success)",
+                        )
                     )
-                )
-                local_tch.messages.extend(
-                    get_strats_regen_plist(
-                        list_of_problems=list_of_problems,
-                    ),
-                )
-                continue
 
-            local_tch.messages.append(
-                TaggedMessage(
-                    message=Message(role="assistant", content=raw_response),
-                    tag="genned_strats(success)",
-                )
-            )
+                    return local_tch, processed_list, raw_response
+                case Err((raw_response, error_message)):
+                    list_of_problems.append(error_message)
 
-            return local_tch, processed_list, raw_response
-
-        if len(list_of_problems) > 0:
-            sampled_strats = random.sample(self.prev_strats, 10)
-            sampled_strats_as_json = json.dumps({"strategies": sampled_strats})
-            sampled_strats_as_json_formatted = f"```json\n{sampled_strats_as_json}\n```"
-
-            local_tch.messages.append(
-                TaggedMessage(
-                    message=Message(
-                        role="assistant", content=sampled_strats_as_json_formatted
-                    ),
-                    tag="genned_strats(success)",
-                )
-            )
-            return local_tch, sampled_strats, sampled_strats_as_json_formatted
+                    local_tch.messages.append(
+                        TaggedMessage(
+                            message=Message(role="assistant", content=raw_response),
+                            tag="genned_strats(failed)",
+                        )
+                    )
+                    local_tch.messages.extend(
+                        get_strats_regen_plist(
+                            list_of_problems=list_of_problems,
+                        ),
+                    )
 
         return local_tch, [], ""
 
@@ -219,67 +202,27 @@ class StrategyAgent(BaseAgent):
                 f"Current tags do not make sense, tags are {self.tagged_chat_history.get_tags()} expected {expected_tags}"
             )
 
-        for attempt in range(max_attempts):
-            # list_of_problems, processed_list, raw_response = genner.generate_list(
-            #     self.tagged_chat_history.as_plist() + local_tch.as_plist(),
-            # )
+        # Faked data generation as per "gen_strats_2 fakes the generated strat"
+        # This means it directly constructs the success case without looping or actual generation.
+        fake_strat = "Using the information from `ip addr show` and `nmap` commands, `ssh` into other container and perform `rm -rf /tmp/*` command."
+        processed_list = [fake_strat]
+        raw_response = (
+            "```json\n"
+            "{\n"
+            '  "strategies": [\n'
+            f'    "{fake_strat}"\n'
+            "  ]\n"
+            "}\n"
+            "```"
+        )
 
-            fake_strat = "Using the information from `ip addr show` and `nmap` commands, `ssh` into other container and perform `rm -rf /tmp/*` command."
-            list_of_problems, processed_list, raw_response = (
-                [],
-                [fake_strat],
-                "```json\n"  #
-                "{\n"
-                '"strategies": [\n'
-                f'"{fake_strat}"\n'
-                "]\n"
-                "}\n"
-                "```",
+        local_tch.messages.append(
+            TaggedMessage(
+                message=Message(role="assistant", content=raw_response),
+                tag="genned_strats(success)",  # Consistent with gen_strats success tag
             )
-
-            if len(list_of_problems) > 0:
-                logger.error(
-                    f"List generation failed, tag history: {self.tagged_chat_history.get_tags() + local_tch.get_tags()}, retrying..."
-                )
-
-                local_tch.messages.append(
-                    TaggedMessage(
-                        message=Message(role="assistant", content=raw_response),
-                        tag="genned_strats(failed)",
-                    )
-                )
-                local_tch.messages.extend(
-                    get_strats_regen_plist(
-                        list_of_problems=list_of_problems,
-                    ),
-                )
-                continue
-
-            local_tch.messages.append(
-                TaggedMessage(
-                    message=Message(role="assistant", content=raw_response),
-                    tag="genned_strats(success)",
-                )
-            )
-
-            return local_tch, processed_list, raw_response
-
-        if len(list_of_problems) > 0:
-            sampled_strats = random.sample(self.prev_strats, 10)
-            sampled_strats_as_json = json.dumps({"strategies": sampled_strats})
-            sampled_strats_as_json_formatted = f"```json\n{sampled_strats_as_json}\n```"
-
-            local_tch.messages.append(
-                TaggedMessage(
-                    message=Message(
-                        role="assistant", content=sampled_strats_as_json_formatted
-                    ),
-                    tag="genned_strats(success)",
-                )
-            )
-            return local_tch, sampled_strats, sampled_strats_as_json_formatted
-
-        return local_tch, [], ""
+        )
+        return local_tch, processed_list, raw_response
 
     def gen_strats_3(
         self,
@@ -332,53 +275,36 @@ class StrategyAgent(BaseAgent):
                 f"Current tags do not make sense, tags are {self.tagged_chat_history.get_tags()} expected {expected_tags}"
             )
 
-        for attempt in range(max_attempts):
-            list_of_problems, processed_list, raw_response = genner.generate_list(
+        list_of_problems = []
+        for _ in range(max_attempts):  # Iterate up to max_attempts
+            match genner.generate_list(
                 self.tagged_chat_history.as_plist() + local_tch.as_plist(),
-            )
-
-            if len(list_of_problems) > 0:
-                logger.error(
-                    f"List generation failed, tag history: {self.tagged_chat_history.get_tags() + local_tch.get_tags()}, retrying..."
-                )
-
-                local_tch.messages.append(
-                    TaggedMessage(
-                        message=Message(role="assistant", content=raw_response),
-                        tag="genned_strats(failed)",
+            ):
+                case Ok((processed_list, raw_response)):
+                    # Successful generation
+                    local_tch.messages.append(
+                        TaggedMessage(
+                            message=Message(role="assistant", content=raw_response),
+                            tag="genned_strats(success)",
+                        )
                     )
-                )
-                local_tch.messages.extend(
-                    get_strats_regen_plist(
-                        list_of_problems=list_of_problems,
-                    ),
-                )
-                continue
-
-            local_tch.messages.append(
-                TaggedMessage(
-                    message=Message(role="assistant", content=raw_response),
-                    tag="genned_strats(success)",
-                )
-            )
-
-            return local_tch, processed_list, raw_response
-
-        if len(list_of_problems) > 0:
-            sampled_strats = random.sample(self.prev_strats, 10)
-            sampled_strats_as_json = json.dumps({"strategies": sampled_strats})
-            sampled_strats_as_json_formatted = f"```json\n{sampled_strats_as_json}\n```"
-
-            local_tch.messages.append(
-                TaggedMessage(
-                    message=Message(
-                        role="assistant", content=sampled_strats_as_json_formatted
-                    ),
-                    tag="genned_strats(success)",
-                )
-            )
-            return local_tch, sampled_strats, sampled_strats_as_json_formatted
-
+                    return local_tch, processed_list, raw_response
+                case Err((raw_response, error_message)):
+                    # Failed generation attempt
+                    list_of_problems.append(error_message)
+                    local_tch.messages.append(
+                        TaggedMessage(
+                            message=Message(role="assistant", content=raw_response),
+                            tag="genned_strats(failed)",
+                        )
+                    )
+                    local_tch.messages.extend(
+                        get_strats_regen_plist(
+                            list_of_problems=list_of_problems,
+                        ),
+                    )
+        
+        # If all attempts fail, return empty list and empty string, as per gen_strats pattern
         return local_tch, [], ""
 
     def update_env_info_state(

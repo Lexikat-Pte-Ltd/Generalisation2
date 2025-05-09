@@ -636,9 +636,10 @@ def main():
 
   kill_containers_with_the_name("learn-container")
 
+  base_image = image_data["name"]
+  base_os = image_data["base_os"]
+
   try:
-    base_image = image_data["name"]
-    base_os = image_data["base_os"]
 
     source_dir = Path("./docker/fedora-learn-compose")
     dst_dir = Path("./docker/learn-compose")
@@ -673,7 +674,7 @@ def main():
 
     successes.append(base_image)
   except Exception as e:
-    print(f"Error during docker operation: {e}")
+    logger.info(f"Error during docker operation: {e}")
     failures.append(base_image)
 
 

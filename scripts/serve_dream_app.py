@@ -90,8 +90,8 @@ def dream_generate_with_visualization(
             return_dict=True,
             add_generation_prompt=True,
         )
-        input_ids = inputs.input_ids.to(device)
-        attention_mask = inputs.attention_mask.to(device)
+        input_ids = inputs.input_ids.to(device) # type: ignore
+        attention_mask = inputs.attention_mask.to(device) # type: ignore
         prompt_length = input_ids.shape[1]
         print(f"Prompt length: {prompt_length}, input_ids device: {input_ids.device}")
     except Exception as e:
@@ -275,7 +275,7 @@ css = """
 .gradio-container .prose ::-moz-selection { background-color: #ACE6FF; }
 """
 
-with gr.Blocks(css=css, theme=gr.themes.Soft()) as demo:
+with gr.Blocks(css=css, theme=gr.themes.Soft()) as demo: # type: ignore
     gr.Markdown("# Dream Diffusion Model Demo (Text-to-Text)")
     gr.Markdown(
         "Interact with the **Dream-v0-Instruct-7B** model in a multi-turn conversation and watch the diffusion process in real time."
@@ -372,13 +372,13 @@ with gr.Blocks(css=css, theme=gr.themes.Soft()) as demo:
         outputs=[chatbot_display, vis_output_display, chat_history_state],
     )
 
-    submit_action = user_input_textbox.submit(**submit_event_args)
+    submit_action = user_input_textbox.submit(**submit_event_args) # type: ignore
     submit_action.then(lambda: "", inputs=None, outputs=[vis_output_display])
-    submit_action.then(**bot_response_event_args)
+    submit_action.then(**bot_response_event_args) # type: ignore
 
-    send_action = send_button.click(**submit_event_args)
+    send_action = send_button.click(**submit_event_args) # type: ignore
     send_action.then(lambda: "", inputs=None, outputs=[vis_output_display])
-    send_action.then(**bot_response_event_args)
+    send_action.then(**bot_response_event_args) # type: ignore
 
 if __name__ == "__main__":
     demo.queue(max_size=10, default_concurrency_limit=1).launch(

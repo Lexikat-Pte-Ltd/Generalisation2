@@ -1,3 +1,10 @@
+data/*
+logs/archive/*
+logs/main_logs/*
+logs/container_launcher.log
+logs/cron.log
+logs/infinite_loop.log
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
