@@ -1,9 +1,12 @@
 # ruff: noqa: E402
-import os 
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-print(f"CUDA_LAUNCH_BLOCKING set to: {os.environ.get('CUDA_LAUNCH_BLOCKING')}")  # Verify
+import os
 
-import torch  
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+print(
+    f"CUDA_LAUNCH_BLOCKING set to: {os.environ.get('CUDA_LAUNCH_BLOCKING')}"
+)  # Verify
+
+import torch
 import asyncio
 import logging
 import gc
@@ -53,6 +56,7 @@ class GenerationRequest(BaseModel):
     top_p: float = Field(default=0.95)
     steps: int = Field(default=10)
     alg: str = Field(default="entropy")
+    alg_temp: float = Field(default=0.0)
     timeout: int = Field(default=300)  # Default timeout in seconds
 
 
@@ -167,12 +171,14 @@ async def run_model_inference(
             progression = []
 
             def generation_tokens_hook_func(step, x, logits):
-                progression.append(
-                    f"Step {step}: "
-                    + tokenizer.decode(x[0].tolist())  # type: ignore
-                    .split(tokenizer.eos_token)[0]  # type: ignore
-                    .replace(tokenizer.mask_token, "<MaskToken>"),  # type: ignore
-                )
+                if step is not None:
+                    if step % 25 == 0:
+                        progression.append(
+                            f"Step {step}: "
+                            + tokenizer.decode(x[0].tolist())  # type: ignore
+                            .split(tokenizer.eos_token)[0]  # type: ignore
+                            .replace(tokenizer.mask_token, "<Mask>"),  # type: ignore
+                        )
                 return x
 
             # Generate text
@@ -287,7 +293,7 @@ async def generate_text(request: GenerationRequest, background_tasks: Background
                                 top_p=request.top_p,
                                 steps=request.steps,
                                 alg=request.alg,
-                                alg_temp=0.0,
+                                alg_temp=request.alg_temp,
                             )
 
                             processing_time = time.time() - processing_start_time
