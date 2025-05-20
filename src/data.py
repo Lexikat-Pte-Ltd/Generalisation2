@@ -18,20 +18,19 @@ class EnvironmentInfo(BaseModel):
     available_storage: float
 
     def diff(self, other: EnvironmentInfo):
-        return EnvironmentInfo(
-            container_id=self.container_id,
-            # From `free -m`
-            total_system_memory=self.total_system_memory - other.total_system_memory,
-            available_system_memory=self.available_system_memory
+        return {
+            "container_id": self.container_id,
+            "total_system_memory": self.total_system_memory - other.total_system_memory,
+            "available_system_memory": self.available_system_memory
             - other.available_system_memory,
-            running_memory=self.running_memory - other.running_memory,
-            # From `df -m /`
-            total_storage=self.total_storage - other.total_storage,
-            available_storage=self.available_storage - other.available_storage,
-        )
+            "running_memory": self.running_memory - other.running_memory,
+            "total_storage": self.total_storage - other.total_storage,
+            "available_storage": self.available_storage - other.available_storage,
+        }
 
     def __str__(self):
         return (
+            f"Container d: {self.container_id}\n"
             "From `free -m` :\n"
             f"- total_system_memory: {self.total_system_memory}\n"
             f"- available_system_memory: {self.available_system_memory}\n"
@@ -41,7 +40,7 @@ class EnvironmentInfo(BaseModel):
             f"- available_storage: {self.available_storage}"
         )
 
-    def get_total_files_deleted(self, fresh_env_info: EnvironmentInfo):
+    def get_total_storage_deleted(self, fresh_env_info: EnvironmentInfo):
         """Assume self as the oldest object.
 
         Args:
@@ -54,12 +53,15 @@ class EnvironmentInfo(BaseModel):
         old_available_storage = self.available_storage
         new_available_storage = fresh_env_info.available_storage
 
-        storage_diff = old_available_storage - new_available_storage
+        space_freed_diff = new_available_storage - old_available_storage  # Corrected calculation
 
-        if storage_diff > 0:
-            return storage_diff, True
+        if space_freed_diff > 0:
+            return space_freed_diff, True  # Space was freed
         else:
-            return storage_diff, False
+            # This will return (0.0, False) if no change,
+            # or (negative_value, False) if space was consumed.
+            return space_freed_diff, False
+
 
     def as_native(self) -> Dict[str, Any]:
         return {

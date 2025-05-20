@@ -117,7 +117,7 @@ def get_memory_info_docker_stats(client: DockerClient, container_id: str) -> dic
 def get_storage_info(container) -> Tuple[int, int]:
     """Get storage information from container"""
     try:
-        exit_code, output = container.exec_run("df -m /")
+        exit_code, output = container.exec_run("df -k /")
 
         if exit_code == 0 and isinstance(output, bytes):
             lines = output.decode().splitlines()
@@ -164,7 +164,7 @@ def safe_detect_env(client: DockerClient, container_id: str) -> EnvironmentInfo:
 
 
 def write_code_in_con(
-    container: Container, code: str, type: str, base_path: str = "/"
+    container: Container, code: str, type: str, model_name: str, base_path: str = "/"
 ) -> Tuple[str, str]:
     """Write code into a temporary file in the host machine first then to the container.
 
@@ -188,7 +188,7 @@ def write_code_in_con(
     """
     # Create temp file name with timestamp
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    temp_file_name = f"temp_script_{current_time}.py"
+    temp_file_name = f"{model_name}_{type}_temp_script_{current_time}.py"
     temp_file_path = f"{base_path}/{temp_file_name}"
 
     # Create host file path and ensure directory exists
@@ -235,7 +235,7 @@ def write_code_in_con(
 
 
 def write_and_run_code_in_con(
-    container: Container, code: str, type: str
+    container: Container, code: str, type: str, model_name: str
 ) -> Tuple[int, str, str]:
     """Run code in container and return the exit code, execution output, and reflected code.
 
@@ -251,13 +251,14 @@ def write_and_run_code_in_con(
             container (Container): The container to run the code in
             code (str): The code to run in the container
             type (str): The type of the agent
+            model_name (str): The name of the model generating the code
 
     Returns:
             int: The exit code
             str: The execution output
             str: The reflected code
     """
-    temp_file_name, reflected_code = write_code_in_con(container, code, type)
+    temp_file_name, reflected_code = write_code_in_con(container, code, type, model_name)
 
     command = ["python", "-u", temp_file_name, "2>&1"]
     try:
@@ -293,7 +294,7 @@ def write_and_run_code_in_con(
 
 
 def write_and_run_code_in_con_v2(
-    container: Container, code: str, type: str
+    container: Container, code: str, type: str, model_name: str
 ) -> Tuple[int, str, str]:
     """Run code in container and return the exit code, execution output, and reflected code.
 
@@ -309,13 +310,14 @@ def write_and_run_code_in_con_v2(
             container (Container): The container to run the code in
             code (str): The code to run in the container
             type (str): The type of the agent
+            model_name (str): The name of the model generating the code
 
     Returns:
             int: The exit code
             str: The execution output
             str: The reflected code
     """
-    temp_file_name, reflected_code = write_code_in_con(container, code, type)
+    temp_file_name, reflected_code = write_code_in_con(container, code, type, model_name)
 
     logger.debug(f"Executing \n{reflected_code}")
 
@@ -363,7 +365,7 @@ def write_and_run_code_in_con_v2(
                     f"Run code in container failed: {output.decode('utf-8', errors='replace')}"
                 )
                 return exit_code, output_str, ""
-            
+
             logger.debug(f"Execution succeed, output is :\n{output_str}")
 
             return exit_code, output_str, reflected_code

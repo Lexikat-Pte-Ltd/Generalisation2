@@ -77,9 +77,13 @@ class DreamGenner(Genner):
 
     @staticmethod
     def extract_code(response: str) -> Result[str, str]:
+        if "```python" not in response or "```" not in response:
+            return Ok(response.strip())
+
         try:
             pattern = r"```python\n([\s\S]*?)```"
             match = re.search(pattern, response, re.DOTALL)
+
             assert match is not None, "Code block not found"
 
             code_str = match.group(1)

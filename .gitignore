@@ -1,3 +1,4 @@
+output/*
 data/*
 logs/archive/*
 logs/main_logs/*

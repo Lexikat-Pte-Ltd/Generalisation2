@@ -167,7 +167,9 @@ def main(
 
     logger.info("EA - Initializing environment agent.")
     ea = EnvAgent(
-        initial_basic_env_infos=initial_basic_env_infos, in_con_path=in_con_path
+        initial_basic_env_infos=initial_basic_env_infos,
+        in_con_path=in_con_path,
+        model_name=BACKEND,
     )
 
     new_tch = ea.get_initial_tch()
@@ -181,7 +183,7 @@ def main(
         backup_genner=backup_genner,
         docker_client=docker_client,
         test_container_id=test_container_id,
-        model_name=BACKEND,
+        model_name=BACKEND,  # Added model_name
         max_attempts_per_code=EA_MAX_ATTEMPTS,
     )
 
@@ -224,7 +226,10 @@ def main(
     main_ca.tagged_chat_history.messages.extend(new_tch.messages)
 
     # Generate strategies based on the new environment info
-    new_tch, main_ca.strats, strats_str = main_ca.gen_strats_3(genner, BACKEND)
+    new_tch, main_ca.strats, strats_str = main_ca.gen_strats_3(
+        genner, model_name=BACKEND
+    )  # Corrected model_name usage
+    main_ca.strats = main_ca.strats[:1]
 
     for t_message in new_tch.messages:
         if t_message.message.role == "assistant":
@@ -236,7 +241,7 @@ def main(
     total_success = 0
     list_of_ca: List[StrategyAgent] = []
     # Process each strategy
-    for i, strat in enumerate(main_ca.strats[:1]):
+    for i, strat in enumerate(main_ca.strats):
         space_freed, strat_local_ca = process_strategy(
             strat=strat,
             i=i,
@@ -298,9 +303,12 @@ def process_strategy(
         test_container_id (str): ID of the test Docker container.
         save_folder (Path): The folder to save data.
     """
-    logger.info(f"SA - {i}-th strat - Code loop started on strat {strat}...")
+    logger.info(
+        f"SA - {int_to_ordinal(i + 1)}-th strat - Code loop started on strat {strat}..."
+    )
     strat_local_ca = deepcopy(ca)
-    loop_bs_env_infos = []
+    loop_bs_env_infos: List[EnvironmentInfo] = []
+    space_freed_total = 0.0  # Initialize space_freed_total
     # Get fresh environment info
     for main_container_id in main_container_ids:
         loop_bs_env_info = safe_detect_env(docker_client, main_container_id)
@@ -319,7 +327,7 @@ def process_strategy(
         ea.bs_env_info_history, ea.sp_env_info_history
     )
     logger.info(
-        f"SA - {i}-th strat - Number of updates on common agent env info's state {changes}"
+        f"SA - {int_to_ordinal(i + 1)} strat - Number of updates on common agent env info's state: {changes}"
     )
 
     strat_local_ca.tagged_chat_history.messages.extend(
@@ -328,20 +336,20 @@ def process_strategy(
 
     # Generate and test code
     attempt = 0
-    space_freed = 0
+    # space_freed = 0 # space_freed is now space_freed_total, initialized above
     code = ""
 
     while attempt < CA_MAX_ATTEMPTS:
         logger.info(
-            f"SA - {int_to_ordinal(i + 1)} strat - {int_to_ordinal(attempt)} attempt - Generating code..."
+            f"SA - {int_to_ordinal(i + 1)} strat - {int_to_ordinal(attempt + 1)} attempt - Generating code..."
         )
         try:
             code, raw_response = genner.generate_code(
-                strat_local_ca.chat_history
+                strat_local_ca.chat_history  # Removed model_name
             ).unwrap()
         except UnwrapError as e:
             logger.error(
-                f"SA - {i}-th strat - {attempt}-th attempt - Failed to generate code,\n",  #
+                f"SA - {int_to_ordinal(i + 1)}-th strat - {int_to_ordinal(attempt + 1)}-th attempt - Failed to generate code,\n",  #
                 f"`e.result.err()`: \n{e.result.err()}\n",
             )
 
@@ -357,7 +365,7 @@ def process_strategy(
         # Time to test it on real container
         container = docker_client.containers.get(main_container_ids[0])
         exit_code, execution_output, reflected_code = write_and_run_code_in_con_v2(
-            container, code, "ea"
+            container, code, "ea", model_name=BACKEND
         )
 
         code_diffs: List[str] = get_code_diff(code, reflected_code)
@@ -370,21 +378,25 @@ def process_strategy(
         else:
             logger.info("SA - Generated code and in container are the same.")
 
-        space_freed_total = 0
+        # space_freed_total = 0 # Moved initialization to the top of the function
         files_deleted_total = 0
 
-        for i in range(len(main_container_ids)):
+        for container_idx in range(len(main_container_ids)):
             # Compare the environment before and after the code execution for each container_id
-            space_freed, files_deleted = loop_bs_env_infos[i].get_total_files_deleted(
-                safe_detect_env(docker_client, main_container_ids[i])
+
+            current_space_freed, files_deleted = loop_bs_env_infos[
+                container_idx
+            ].get_total_storage_deleted(
+                safe_detect_env(docker_client, main_container_ids[container_idx])
             )
 
-            space_freed_total += space_freed
-            files_deleted_total += files_deleted
+            if current_space_freed > 0:
+                space_freed_total += current_space_freed
+            files_deleted_total += files_deleted  # files_deleted is True (1) only if current_space_freed > 0
 
         if not files_deleted_total:
             logger.error(
-                f"SA - {i}-th strat - {attempt + 1}-th attempt - "
+                f"SA - {int_to_ordinal(i + 1)}-th strat - {int_to_ordinal(attempt + 1)}-th attempt - "
                 f"No spaces are freed \n{execution_output}"
             )
             logger.debug(f"SA - Code is \n{code[:100]}...")
@@ -412,9 +424,13 @@ def process_strategy(
         break
 
     if attempt >= CA_MAX_ATTEMPTS:
-        logger.info(f"SA - {i}-th strat - Codegen loop ended up in failure")
+        logger.info(
+            f"SA - {int_to_ordinal(i + 1)}-th strat - Codegen loop ended up in failure"
+        )
     else:
-        logger.info(f"SA - {i}-th strat - Codegen loop ended up in success")
+        logger.info(
+            f"SA - {int_to_ordinal(i + 1)}-th strat - Codegen loop ended up in success"
+        )
         strat_local_ca.tagged_chat_history.messages.append(
             TaggedMessage(
                 message=Message(role="assistant", content=f"```python\n{code}\n```"),
@@ -422,13 +438,13 @@ def process_strategy(
             )
         )
 
-    logger.debug(f"SA - {i}-th strat - Code is \n{code[:100]}...")
+    logger.debug(f"SA - {int_to_ordinal(i + 1)}-th strat - Code is \n{code[:100]}...")
 
     logger.info(
-        f"Code loop is done for the strat {strat} on {attempt}-th iteration. Continuing to next strat if exists..."
+        f"Code loop is done for the strat {strat} on {int_to_ordinal(attempt + 1)}-th iteration. Continuing to next strat if exists..."
     )
 
-    return space_freed, strat_local_ca
+    return space_freed_total, strat_local_ca
 
 
 def validate_and_run_code(
@@ -460,7 +476,7 @@ def validate_and_run_code(
 
     if not ast_valid:
         logger.error(
-            f"SA - {i}-th strat - {attempt + 1}-th attempt - AST error \n{ast_error}"
+            f"SA - {int_to_ordinal(i + 1)}-th strat - {int_to_ordinal(attempt + 1)}-th attempt - AST error \n{ast_error}"
         )
         logger.debug(f"SA - Code is \n{code[:100]}...")
 
@@ -482,7 +498,7 @@ def validate_and_run_code(
     compile_valid, compiler_error = is_valid_code_compiler(code)
     if not compile_valid:
         logger.error(
-            f"SA - {i}-th strat - {attempt + 1}-th attempt - "
+            f"SA - {int_to_ordinal(i + 1)}-th strat - {int_to_ordinal(attempt + 1)}-th attempt - "
             f"Native `compile` error \n{compiler_error}"
         )
         logger.debug(f"SA - Code is \n{code[:100]}...")
@@ -503,12 +519,12 @@ def validate_and_run_code(
         return False
 
     exit_code, execution_output, reflected_code = write_and_run_code_in_con_v2(
-        container, code, "ea"
+        container, code, "ea", model_name=BACKEND
     )
 
     if exit_code != 0:
         logger.error(
-            f"SA - {i}-th strat - {attempt + 1}-th attempt - "
+            f"SA - {int_to_ordinal(i + 1)}-th strat - {int_to_ordinal(attempt + 1)}-th attempt - "
             f"In container error \n{execution_output}"
         )
         logger.debug(f"SA - Code is \n{code[:100]}...")
@@ -531,7 +547,7 @@ def validate_and_run_code(
 
     if execution_output.strip() == "":
         logger.error(
-            f"SA - {i}-th strat - {attempt + 1}-th attempt - "
+            f"SA - {int_to_ordinal(i + 1)}-th strat - {int_to_ordinal(attempt + 1)}-th attempt - "
             f"The code doesnt return any output"
         )
         logger.debug(f"SA - Code is \n{code[:100]}...")

@@ -55,12 +55,12 @@ class DreamConfig(NamedTuple):
     # base_url: str = os.getenv("DREAM_BASE_URL", "http://localhost:6969")
     timeout: int = 120
 
-    # Generation parameters
-    max_new_tokens: int = 512
-    temperature: float = 0.2
-    top_p: float = 0.95
+    max_new_tokens: int = 256
+    temperature: float = 0.0
+    top_p: float = 0.8
+    steps: int = 64
 
-    # Algorithm settings
-    steps: int = 10
-    alg: str = "entropy"
-    # alg_temp: float = 0.0
+    top_k: int = 20
+
+    alg: str = "origin"
+    alg_temp: float = 0.3
