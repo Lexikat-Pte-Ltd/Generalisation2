@@ -5,8 +5,8 @@ from typing import List, Tuple
 
 from result import Result, Ok, Err
 
-from .Ollama import OllamaGenner
-from .config import QwenConfig
+from .Base import OllamaGenner
+from src.config import QwenConfig
 
 
 class QwenGenner(OllamaGenner):

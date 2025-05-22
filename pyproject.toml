@@ -7,6 +7,7 @@ requires-python = ">=3.10.14"
 dependencies = [
     "anthropic>=0.37.1",
     "bitsandbytes>=0.45.0",
+    "cyclopts>=3.16.1",
     "datasets>=3.2.0",
     "debugpy>=1.8.8",
     "docker",
@@ -27,7 +28,9 @@ dependencies = [
     "psutil",
     "pydantic",
     "pyright>=1.1.400",
+    "python-configuration>=0.12.1",
     "python-dotenv",
+    "python-on-whales>=0.76.1",
     "pyyaml>=6.0.2",
     "result>=0.17.0",
     "schedule>=1.2.2",

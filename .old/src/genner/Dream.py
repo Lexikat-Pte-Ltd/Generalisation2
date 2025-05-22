@@ -6,8 +6,8 @@ import requests
 from loguru import logger
 from result import Result, Ok, Err, UnwrapError
 
-from .config import DreamConfig
-from src.typing.message import Message
+from src.config import DreamConfig
+from src.types import PList
 
 from .Base import Genner
 
@@ -17,11 +17,11 @@ class DreamGenner(Genner):
         super().__init__("dream")
         self.config = config
 
-    def plist_completion(self, messages: List[Message]) -> Result[str, str]:
+    def plist_completion(self, messages: PList) -> Result[str, str]:
         url = f"{self.config.base_url.rstrip('/')}/generate"
-
+        messages_native = cast(Any, messages.as_native())
         payload = {
-            "messages": messages,
+            "messages": messages_native,
             "max_new_tokens": self.config.max_new_tokens,
             "temperature": self.config.temperature,
             "top_p": self.config.top_p,
@@ -52,7 +52,7 @@ class DreamGenner(Genner):
             )
 
     def generate_code(
-        self, messages: List[Message]
+        self, messages: PList
     ) -> Result[Tuple[str, str], Tuple[str, Optional[str]]]:
         raw_response: Optional[str] = None
         try:
@@ -62,7 +62,7 @@ class DreamGenner(Genner):
         except UnwrapError as e:
             error_message = (
                 "DreamGenner.generate_code: Unwrap error,\n"
-                f"`self.config`: {self.config}\n"  # Note: DreamConfig doesn't have .name or .model directly like ClaudeConfig
+                f"`self.config`: {self.config}\n" # Note: DreamConfig doesn't have .name or .model directly like ClaudeConfig
                 f"`e.result.err()`: \n{e.result.err()}\n"
             )
             return Err((error_message, raw_response))
@@ -98,7 +98,7 @@ class DreamGenner(Genner):
             )
 
     def generate_list(
-        self, messages: List[Message]
+        self, messages: PList
     ) -> Result[Tuple[List[str], str], Tuple[str, Optional[str]]]:
         raw_response: Optional[str] = None
         try:
@@ -108,7 +108,7 @@ class DreamGenner(Genner):
         except UnwrapError as e:
             error_message = (
                 "DreamGenner.generate_list: Unwrap error,\n"
-                f"`self.config`: {self.config}\n"  # Note: DreamConfig doesn't have .name or .model directly
+                f"`self.config`: {self.config}\n" # Note: DreamConfig doesn't have .name or .model directly
                 f"`e.result.err()`: \n{e.result.err()}\n"
             )
             return Err((error_message, raw_response))
