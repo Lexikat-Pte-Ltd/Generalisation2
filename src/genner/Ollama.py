@@ -31,7 +31,7 @@ class OllamaGenner(Genner):
             if response.message.content is None:
                 return Err(
                     "OllamaGenner.plist_completion: No content in response,\n"  #
-                    f"`self.config.model`: {self.config.model}"
+                    f"`self.config.model`: {self.config.model}\n"
                     f"`messages`: \n{messages}"
                 )
 
@@ -39,15 +39,14 @@ class OllamaGenner(Genner):
         except TimeoutError as e:
             return Err(
                 "OllamaGenner.plist_completion: Timeout error,\n"  #
-                f"`self.config.model`: {self.config.model}"
+                f"`self.config.model`: {self.config.model}\n"
                 f"`messages`: \n{messages}\n"
                 f"`e`: \n{e}"
             )
         except Exception as e:
             return Err(
                 "OllamaGenner.plist_completion: Unexpected error,\n"  #
-                f"`self.config.name`: {self.config.name}"
-                f"`self.config.model`: {self.config.model}"
+                f"`self.config`: {self.config}\n"
                 f"`messages`: \n{messages}\n"
                 f"`e`: \n{e}"
             )

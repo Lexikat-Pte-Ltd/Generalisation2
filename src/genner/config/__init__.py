@@ -5,10 +5,9 @@ from pydantic import BaseModel
 
 class OllamaConfig(ABC, BaseModel):
     name: str
-    endpoint: str = "http://localhost:11434/api/chat"
+    endpoint: str = "localhost:11434"
     model: str
     stream: bool
-
 
 class QwenConfig(OllamaConfig):
     name: str = "Ollama Qwen"

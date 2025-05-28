@@ -1,11 +1,12 @@
 import io
+import json
 import shutil
 import subprocess
 import tarfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, cast
+from typing import Optional, Tuple, cast
 
 from loguru import logger
 from result import Err, Ok, Result
@@ -116,7 +117,7 @@ def write_code_in_con(
 
 
 def run_code_in_con(
-    container: DockerContainer, temp_file_path: str
+    container: DockerContainer, in_container_script_path: str
 ) -> Result[str, str]:
     """Run code in container and return the exit code, execution output, and reflected code.
 
@@ -129,8 +130,8 @@ def run_code_in_con(
     - Return the exit code, execution output, and reflected code
 
     Args:
-        code (str): The Python code to run in the container
-        postfix (str): The type identifier for the agent, used in the file path
+        container (DockerContainer): The container to run the code in
+        temp_file_path (str): The path to the file in container containing the code
 
     Returns:
         Result[str, str]:
@@ -143,7 +144,9 @@ def run_code_in_con(
     """
     rand_id = nanoid(12)
 
-    command_str = f"echo {rand_id};python -u {temp_file_path} 2>&1"  # Use shell syntax
+    command_str = (
+        f"echo {rand_id};python -u {in_container_script_path} 2>&1"  # Use shell syntax
+    )
     cmd = ["/bin/sh", "-c", command_str]  # Execute via shell
     timeout_bool = False
     timeout_checker = time.time()
@@ -207,96 +210,99 @@ def run_code_in_con(
     return Ok(python_output_str)
 
 
-def get_container_free_disk_space(
-    client: DockerClient, container: DockerContainer
-) -> tuple[int, int]:
-    """
-    Gets the free disk space related to a Docker container.
+def get_container_free_disk_space(client, container) -> Tuple[Optional[int], int]:
+    container_size_rw = None
+    container_size_root_fs = None  # To store SizeRootFs if found
+    total_free_space_on_docker_root = -1
 
-    This function provides two pieces of information:
-    1.  Size of the container's writable layer (how much it's currently using).
-    2.  Available space on the filesystem hosting Docker's root directory.
-        This is a general indicator of how much space is left for *all*
-        Docker operations (new images, new container layers, etc.) on that
-        partition, not just for this specific container. A container can
-        theoretically grow until this space is exhausted.
+    print("--- Attempting to get SizeRw from container.attrs ---")
+    # print(json.dumps(container.attrs, indent=2)) # Already printed in previous step
 
-    Args:
-        container_id: The ID or name of the Docker container.
-
-    Returns:
-        A tuple containing:
-            - int:
-                Size of the container's writable layer in bytes.
-            - int:
-                Total free space in bytes on the Docker root filesystem.
-    """
     try:
-        # 1. Get the size of the container's writable layer
-        container_size_rw = None
-        if (
-            "SizeRw" in container.attrs["GraphDriver"]["Data"]
-        ):  # For overlay2, aufs etc.
-            container_size_rw = container.attrs["GraphDriver"]["Data"]["SizeRw"]
-        elif (
-            container.attrs.get("SizeRw") is not None
-        ):  # Fallback for some configurations
+        # Initial attempt from container.attrs
+        graph_driver_data = container.attrs.get("GraphDriver", {}).get("Data", {})
+        if "SizeRw" in graph_driver_data and graph_driver_data["SizeRw"] is not None:
+            container_size_rw = graph_driver_data["SizeRw"]
+        elif container.attrs.get("SizeRw") is not None:
             container_size_rw = container.attrs["SizeRw"]
 
-        # 2. Get free space on the Docker root directory's filesystem
-        #    This is where the container's writable layer (and images) are stored.
-        #    A container can grow until this space is consumed.
-        docker_info = client.info()
-        docker_root_dir = docker_info.get("DockerRootDir")
-        host_free_space = None
+        if container_size_rw is not None:
+            print(f"Found SizeRw in container.attrs: {container_size_rw}")
+        else:
+            print(
+                "SizeRw not found in container.attrs. Attempting fallback using client.df()."
+            )
+            try:
+                disk_usage_info = client.df()
+                # print("\n--- client.df() output ---")
+                # print(json.dumps(disk_usage_info, indent=2))
+                # print("--- End of client.df() output ---\n")
 
+                if "Containers" in disk_usage_info and disk_usage_info["Containers"]:
+                    for c_info in disk_usage_info["Containers"]:
+                        if c_info.get("Id") == container.id:
+                            print(
+                                f"Found container {container.id[:12]} in client.df() output."
+                            )
+                            print(
+                                f"Container info from df(): {json.dumps(c_info, indent=2)}"
+                            )
+                            if c_info.get("SizeRw") is not None:
+                                container_size_rw = c_info["SizeRw"]
+                                print(
+                                    f"Found SizeRw via client.df(): {container_size_rw}"
+                                )
+                            if c_info.get("SizeRootFs") is not None:
+                                container_size_root_fs = c_info["SizeRootFs"]
+                                print(
+                                    f"Found SizeRootFs via client.df(): {container_size_root_fs}"
+                                )
+                            break  # Found our container
+                    if container_size_rw is None and container_size_root_fs is None:
+                        print(
+                            f"Container {container.id[:12]} was found in client.df(), but SizeRw and SizeRootFs were not available in its entry."
+                        )
+                else:
+                    print(
+                        "No 'Containers' data found in client.df() output or it was empty."
+                    )
+
+            except Exception as e_df:
+                print(f"Error attempting to use client.df(): {e_df}")
+
+        if container_size_rw is None:
+            print(
+                "Could not determine SizeRw (writable layer size) through any method."
+            )
+            if container_size_root_fs is not None:
+                print(
+                    f"However, SizeRootFs (total image + writable layer) was found: {container_size_root_fs} bytes. This is a related metric."
+                )
+
+        # Get total free space on Docker root filesystem
+        docker_root_dir = client.info().get("DockerRootDir")
         if docker_root_dir:
             try:
-                # Get the partition/filesystem of the Docker root directory
-                # Note: shutil.disk_usage gives usage for the *filesystem*
-                # that docker_root_dir resides on.
                 usage = shutil.disk_usage(docker_root_dir)
-                host_free_space = usage.free
+                total_free_space_on_docker_root = usage.free
             except FileNotFoundError:
-                logger.error(
-                    f"Warning: Docker root directory '{docker_root_dir}' not found. "
-                    "Cannot determine host free space."
+                print(
+                    f"Error: DockerRootDir '{docker_root_dir}' not found. Cannot get disk usage."
                 )
-            except Exception as e:
-                logger.error(
-                    f"Warning: Could not get disk usage for '{docker_root_dir}': {e}"
-                )
+            except Exception as e_shutil:
+                print(f"Error getting disk usage for '{docker_root_dir}': {e_shutil}")
         else:
-            logger.error(
-                "Warning: Could not determine DockerRootDir to check host free space."
-            )
+            print("Could not determine DockerRootDir from client.info().")
 
-        assert container_size_rw is not None, "Container size (RW) is None"
-        assert host_free_space is not None, "Host free space is None"
+    except Exception as e_main:
+        print(f"An error occurred in get_container_free_disk_space: {e_main}")
+        # Ensure tuple is returned matching signature
+        return (container_size_rw if container_size_rw is not None else None), -1
 
-        return container_size_rw, host_free_space
-
-    except DockerNotFoundException as e:
-        logger.error(
-            "Docker container not found while getting container's free space, \n"
-            f"`container.id`: {container.id}\n"
-            f"`e`: \n{e}\n"
-        )
-        raise e
-    except DockerAPIErrorException as e:
-        logger.error(
-            "Docker API error while getting container's free space, \n"
-            f"`container.id`: {container.id}\n"
-            f"`e`: \n{e}\n"
-        )
-        raise e
-    except Exception as e:
-        logger.error(
-            "Unexpected error while getting container's free space, \n"
-            f"`container.id`: {container.id}\n"
-            f"`e`: \n{e}\n"
-        )
-        raise e
+    # Prioritize returning SizeRw if found.
+    # If you want to return SizeRootFs when SizeRw is None, you'd adjust the logic here.
+    # For now, the function signature implies returning SizeRw or None for the first element.
+    return container_size_rw, total_free_space_on_docker_root
 
 
 def wait_and_get_container(

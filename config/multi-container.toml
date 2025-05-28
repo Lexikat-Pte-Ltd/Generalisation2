@@ -1,3 +1,12 @@
 dev = true
-container_ids = []
+model_name = "qwen"
+host_cache_path = "./code/multi-container/"
+container_ids = ["special-learn-compose-service-a-1", "special-learn-compose-service-b-1"]
+main_container_idx = 0
 dynamic_container = false
+docker_compose_dir = "./docker/special-learn-compose"
+
+[special_egc]
+code_host_cache_folder = "./data/special_egc/"
+count = 2
+max_retries = 5

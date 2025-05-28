@@ -1,3 +1,12 @@
 dev = true
-container_ids = []
+model_name = "qwen"
+host_cache_path = "./code/single-container/"
+container_ids = ["learn-container"]
+main_container_idx = 0
 dynamic_container = false
+docker_compose_dir = ""
+
+[special_egc]
+code_host_cache_folder = "./data/special_egc/"
+count = 2
+max_retries = 5

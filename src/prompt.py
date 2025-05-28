@@ -76,7 +76,7 @@ Format :
 - strategyN
 ```
 """)
-def get_strategies_req_prompt(
+def get_strategy_list_req_prompt(
     basic_env_infos: List[str],
     special_env_infos: List[str],
     previous_strategies: List[str],
@@ -132,17 +132,15 @@ def get_strategy_code_req_prompt(
 
 
 @prompt("""
-Improve the Python code for strategy "{strategy}" based on the provided error output.
+Repair the following code with these contexts.
 
-Error Context:
-Run context: {run_contexts}
+Error Contexts:
+Error sources: {error_sources}
 Error output: {error_contexts}
 Regeneration attempts done: {regen_count}
 
-Previous Latest Code:
-```python
-{latest_code}
-```
+Previous Latest Generation:
+{latest_generation}
 
 Code Requirements:
 - Address Error: Fix issues highlighted in the error.
@@ -163,16 +161,47 @@ main()
 ```
 """)
 def get_regen_code_req_prompt(
-    strategy: str,
-    run_contexts: List[str],
-    error_contexts: List[str],
     regen_count: int,
-    latest_code: str,
+    error_sources: List[str],
+    error_contexts: List[str],
+    latest_generation: str,
 ):
     return {
-        "strategy": strategy,
-        "run_contexts": "\n".join(run_contexts),
-        "error_contexts": "\n".join(error_contexts),
         "regen_count": regen_count,
-        "latest_code": latest_code,
+        "error_sources": "\n".join(error_sources),
+        "error_contexts": "\n".join(error_contexts),
+        "latest_generation": latest_generation,
+    }
+
+
+@prompt("""
+Repair the following previous generation with these contexts.
+
+Error Contexts:
+Error message: {error_contexts}
+Regeneration attempts done: {regen_count}
+
+Previous Latest Generation:
+{latest_generation}
+
+Requirements:
+- Address Error: Fix issues highlighted in the error.
+
+Format: 
+```
+- strategy1
+- strategy2
+...
+- strategyN
+```
+""")
+def get_regen_list_req_prompt(
+    regen_count: int,
+    error_contexts: List[str],
+    latest_generation: str,
+):
+    return {
+        "regen_count": regen_count,
+        "error_contexts": "\n".join(error_contexts),
+        "latest_generation": latest_generation,
     }
