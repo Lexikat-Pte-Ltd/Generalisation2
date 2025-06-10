@@ -18,6 +18,7 @@ dependencies = [
     "jinja2>=3.1.4",
     "jsonlines",
     "loguru",
+    "matplotlib>=3.10.3",
     "ollama>=0.4.4",
     "openai",
     "pandas>=2.2.3",
@@ -65,3 +66,4 @@ exclude = [
 ]
 reportMissingImports = "warning"  # Change to "none" if you want to ignore those
 verboseOutput = true
+typeCheckingMode = "standard"

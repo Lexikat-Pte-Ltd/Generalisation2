@@ -1,12 +1,22 @@
 dev = true
 model_name = "qwen"
-host_cache_path = "./code/single-container/"
+host_cache_path = "./code/single-container/code/"
 container_ids = ["learn-container"]
 main_container_idx = 0
+
+# These 2 below are mutually exclusive
 dynamic_container = false
 docker_compose_dir = ""
 
+train_data_save_folder = "./data/single-container/train_data/"
+
 [special_egc]
-code_host_cache_folder = "./data/special_egc/"
+count = 2
+max_retries = 5
+
+[strategy_list]
+max_retries = 5
+
+[strategy_code]
 count = 2
 max_retries = 5

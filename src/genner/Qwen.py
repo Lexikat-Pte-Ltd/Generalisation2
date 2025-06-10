@@ -33,6 +33,7 @@ class QwenGenner(OllamaGenner):
 
     @staticmethod
     def extract_list(response: str) -> Result[List[str], str]:
+        # Try JSON parsing first
         try:
             # Remove markdown code block markers and "json" label
             json_str = response.replace("```json", "").replace("```", "").strip()
@@ -58,8 +59,36 @@ class QwenGenner(OllamaGenner):
 
             return Ok(processed_list)
         except Exception as e:
+            pass_1_exception = e
+
+        try:
+            match = re.search(r"```(.*)```", response, re.DOTALL)
+
+            if not match:
+                return Err(
+                    "QwenGenner.extract_list: No backticks (```) found in the response, "
+                    f"`response`: \n{response}\n"
+                )
+
+            # Extract the content inside the backticks (group 1 of the match)
+            content_inside_backticks = match.group(1).strip()
+
+            processed_list = []
+            # Split the extracted content into individual lines
+            lines = content_inside_backticks.strip().split("\n")
+
+            for line in lines:
+                # Check if the line starts with a hyphen
+                if line.strip().startswith("-"):
+                    # Remove the leading hyphen and any surrounding whitespace
+                    list_item = line.strip().lstrip("- ").strip()
+                    processed_list.append(list_item)
+
+            return Ok(processed_list)
+        except Exception as e:
             return Err(
-                "QwenGenner.extract_list: Unexpected error,\n"
+                "QwenGenner.extract_list: Failed to parse response as JSON and also failed to extract strategies from backticks, "
+                f"`pass_1_exception`: \n{pass_1_exception}\n"
+                f"`pass_2_exception`: \n{e}\n"
                 f"`response`: \n{response}\n"
-                f"`e`: \n{e}\n"
             )

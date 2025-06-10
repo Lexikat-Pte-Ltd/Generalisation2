@@ -8,6 +8,7 @@ from src.prompt import (
     get_regen_code_req_prompt,
     get_regen_list_req_prompt,
     get_sp_egc_req_prompt,
+    get_strategy_code_req_prompt,
     get_strategy_list_req_prompt,
     get_system_prompt,
 )
@@ -57,6 +58,34 @@ def generate_strategy_list(
                 basic_env_infos=env_infos,
                 special_env_infos=special_env_infos,
                 previous_strategies=previous_strategies,
+            ).formatted_prompt,
+        },
+    ]
+
+    match genner.plist_completion(messages):
+        case Ok(raw_response):
+            return Ok((raw_response, messages))
+        case Err(err):
+            return Err(err)
+
+
+def generate_strategy_code(
+    genner: Genner,
+    strategy: str,
+    env_infos: List[str],
+    special_env_infos: List[str],
+) -> Result[Tuple[RawResponse, List[Message]], str]:
+    messages: List[Message] = [
+        {
+            "role": "system",
+            "content": get_system_prompt().formatted_prompt,
+        },
+        {
+            "role": "user",
+            "content": get_strategy_code_req_prompt(
+                strategy=strategy,
+                basic_env_infos=env_infos,
+                special_env_infos=special_env_infos,
             ).formatted_prompt,
         },
     ]

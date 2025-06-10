@@ -75,7 +75,7 @@ def write_code_in_con(
 
     # Create host file path and ensure directory exists
     # logger.info(f"Writing file {temp_file_name} into host machine")
-    host_path = host_cache_folder / f"temp_codes_{postfix}/{temp_file_name}"
+    host_path = host_cache_folder / temp_file_name
     host_path.parent.mkdir(parents=True, exist_ok=True)
     host_path.write_text(code)
 
@@ -142,44 +142,14 @@ def run_code_in_con(
         - The execution has a timeout of 150 seconds
         - After execution, any remaining Python processes are killed
     """
-    rand_id = nanoid(12)
-
-    command_str = (
-        f"echo {rand_id};python -u {in_container_script_path} 2>&1"  # Use shell syntax
-    )
+    command_str = f"python -u {in_container_script_path} 2>&1"
     cmd = ["/bin/sh", "-c", command_str]  # Execute via shell
     timeout_bool = False
     timeout_checker = time.time()
-
-    def kill_processes_with_sudo(pid):
-        try:
-            # Run kill with sudo for processes not owned by the user
-            subprocess.run(["sudo", "kill", "-9", str(pid)], check=True)
-            print(f"Killed process {pid} using sudo")
-        except subprocess.CalledProcessError as e:
-            print(f"Failed to kill process {pid}: {e}")
-
-    def kill_processes_by_name(keyword):
-        try:
-            # Run the ps command and filter with grep
-            output = subprocess.check_output(["ps", "aux"], text=True)
-            print(keyword)
-            for line in output.splitlines():
-                if keyword in line:
-                    parts = line.split()
-                    pid = int(parts[1])
-                    print(f"Killing PID {pid}: {line}")
-                    kill_processes_with_sudo(pid)
-
-        except Exception as e:
-            print(f"Error: {e}")
-
     timeout_seconds = 600
+
     try:
-        with timeout(
-            seconds=timeout_seconds,
-            callback=lambda: kill_processes_by_name(rand_id),
-        ):
+        with timeout(seconds=timeout_seconds):
             python_exit_code, python_output = cast(
                 Tuple[int, bytes],
                 container.exec_run(
@@ -210,13 +180,12 @@ def run_code_in_con(
     return Ok(python_output_str)
 
 
-def get_container_free_disk_space(client, container) -> Tuple[Optional[int], int]:
+def get_container_free_disk_space_kb_v1(
+    client, container
+) -> Tuple[Optional[float], Optional[float]]:
     container_size_rw = None
     container_size_root_fs = None  # To store SizeRootFs if found
-    total_free_space_on_docker_root = -1
-
-    print("--- Attempting to get SizeRw from container.attrs ---")
-    # print(json.dumps(container.attrs, indent=2)) # Already printed in previous step
+    total_free_space_on_docker_root = None
 
     try:
         # Initial attempt from container.attrs
@@ -227,55 +196,52 @@ def get_container_free_disk_space(client, container) -> Tuple[Optional[int], int
             container_size_rw = container.attrs["SizeRw"]
 
         if container_size_rw is not None:
-            print(f"Found SizeRw in container.attrs: {container_size_rw}")
+            logger.info(f"Found SizeRw in container.attrs: {container_size_rw}")
         else:
-            print(
+            logger.warning(
                 "SizeRw not found in container.attrs. Attempting fallback using client.df()."
             )
             try:
                 disk_usage_info = client.df()
-                # print("\n--- client.df() output ---")
-                # print(json.dumps(disk_usage_info, indent=2))
-                # print("--- End of client.df() output ---\n")
 
                 if "Containers" in disk_usage_info and disk_usage_info["Containers"]:
                     for c_info in disk_usage_info["Containers"]:
                         if c_info.get("Id") == container.id:
-                            print(
+                            logger.debug(
                                 f"Found container {container.id[:12]} in client.df() output."
                             )
-                            print(
+                            logger.debug(
                                 f"Container info from df(): {json.dumps(c_info, indent=2)}"
                             )
                             if c_info.get("SizeRw") is not None:
                                 container_size_rw = c_info["SizeRw"]
-                                print(
+                                logger.debug(
                                     f"Found SizeRw via client.df(): {container_size_rw}"
                                 )
                             if c_info.get("SizeRootFs") is not None:
                                 container_size_root_fs = c_info["SizeRootFs"]
-                                print(
+                                logger.debug(
                                     f"Found SizeRootFs via client.df(): {container_size_root_fs}"
                                 )
                             break  # Found our container
                     if container_size_rw is None and container_size_root_fs is None:
-                        print(
+                        logger.warning(
                             f"Container {container.id[:12]} was found in client.df(), but SizeRw and SizeRootFs were not available in its entry."
                         )
                 else:
-                    print(
+                    logger.warning(
                         "No 'Containers' data found in client.df() output or it was empty."
                     )
 
             except Exception as e_df:
-                print(f"Error attempting to use client.df(): {e_df}")
+                logger.warning(f"Error attempting to use client.df(): {e_df}")
 
         if container_size_rw is None:
-            print(
+            logger.warning(
                 "Could not determine SizeRw (writable layer size) through any method."
             )
             if container_size_root_fs is not None:
-                print(
+                logger.warning(
                     f"However, SizeRootFs (total image + writable layer) was found: {container_size_root_fs} bytes. This is a related metric."
                 )
 
@@ -286,23 +252,86 @@ def get_container_free_disk_space(client, container) -> Tuple[Optional[int], int
                 usage = shutil.disk_usage(docker_root_dir)
                 total_free_space_on_docker_root = usage.free
             except FileNotFoundError:
-                print(
+                logger.warning(
                     f"Error: DockerRootDir '{docker_root_dir}' not found. Cannot get disk usage."
                 )
             except Exception as e_shutil:
-                print(f"Error getting disk usage for '{docker_root_dir}': {e_shutil}")
+                logger.warning(
+                    f"Error getting disk usage for '{docker_root_dir}': {e_shutil}"
+                )
         else:
-            print("Could not determine DockerRootDir from client.info().")
+            logger.warning("Could not determine DockerRootDir from client.info().")
 
     except Exception as e_main:
-        print(f"An error occurred in get_container_free_disk_space: {e_main}")
+        logger.warning(f"An error occurred in get_container_free_disk_space: {e_main}")
         # Ensure tuple is returned matching signature
-        return (container_size_rw if container_size_rw is not None else None), -1
+        return (container_size_rw if container_size_rw is not None else None), None
 
-    # Prioritize returning SizeRw if found.
-    # If you want to return SizeRootFs when SizeRw is None, you'd adjust the logic here.
-    # For now, the function signature implies returning SizeRw or None for the first element.
-    return container_size_rw, total_free_space_on_docker_root
+    logger.debug(
+        f"Container {container.id[:12]} SizeRw: {container_size_rw}, SizeRootFs: {container_size_root_fs}, Free space on Docker root: {total_free_space_on_docker_root} bytes"
+    )
+    container_size_rw_kb = (
+        container_size_rw / 1024.0
+        if container_size_rw is not None and container_size_rw >= 0
+        else None
+    )
+    total_free_space_on_docker_root_kb = (
+        total_free_space_on_docker_root / 1024.0
+        if total_free_space_on_docker_root is not None
+        and total_free_space_on_docker_root >= 0
+        else None
+    )
+
+    return container_size_rw_kb, total_free_space_on_docker_root_kb
+
+
+def get_container_free_disk_space_kb_v2(
+    container: DockerContainer,
+) -> float:
+    """
+    Gets the available disk space for the root filesystem inside a container.
+
+    Returns:
+        float: Available space in Kilobytes.
+    """
+    try:
+        # Execute df -k to get disk usage in Kilobytes
+        exit_code, output = container.exec_run("df -k /")
+
+        if exit_code == 0 and isinstance(output, bytes):
+            logger.debug(
+                f"Successfully retrieved storage info using `df -k /`. Output: \n{output.decode().strip()}"
+            )
+
+            lines = output.decode().strip().splitlines()
+            # Ensure we have the data line to parse
+            if len(lines) < 2:
+                raise Exception(
+                    "`df -k /` output is in an unexpected format: not enough lines."
+                )
+
+            storage_info = lines[1].split()
+
+            # Ensure the line has enough columns
+            if len(storage_info) < 4:
+                raise Exception(
+                    "`df -k /` output is in an unexpected format: not enough columns."
+                )
+
+            # Index 3 corresponds to the 'Available' column with df
+            available_kb = float(storage_info[3])  # This value is in Kilobytes
+
+            return available_kb
+        else:
+            # Correctly reference the command that was executed
+            error_output = output.decode() if isinstance(output, bytes) else str(output)
+            raise Exception(
+                f"Failed to retrieve storage information with `df -k /`. Exit code: {exit_code}, Output: {error_output}"
+            )
+
+    except Exception as e:
+        logger.error(f"Storage info retrieval failed: {e}")
+        raise e
 
 
 def wait_and_get_container(
